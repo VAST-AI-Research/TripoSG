@@ -63,6 +63,12 @@ Generate a 3D mesh from an image:
 python -m scripts.inference_triposg --image-input assets/example_data/hjswed.png
 ```
 
+Limiting the number of faces and giving a custom name to the output:
+```bash
+python -m scripts.inference_triposg --image-input assets/example_data/hjswed.png --faces 5000 --name "Lowpoly Dino"
+```
+
+
 The required model weights will be automatically downloaded:
 - TripoSG model from [VAST-AI/TripoSG](https://huggingface.co/VAST-AI/TripoSG) → `pretrained_weights/TripoSG`
 - RMBG model from [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) → `pretrained_weights/RMBG-1.4`

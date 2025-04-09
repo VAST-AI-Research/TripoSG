@@ -16,6 +16,7 @@ from triposg.pipelines.pipeline_triposg import TripoSGPipeline
 from image_process import prepare_image
 from briarmbg import BriaRMBG
 
+import pymeshlab
 
 
 @torch.no_grad()
@@ -26,6 +27,7 @@ def run_triposg(
     seed: int,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.0,
+    faces: int = -1,
 ) -> trimesh.Scene:
 
     img_pil = prepare_image(image_input, bg_color=np.array([1.0, 1.0, 1.0]), rmbg_net=rmbg_net)
@@ -36,9 +38,32 @@ def run_triposg(
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
     ).samples[0]
-    mesh = trimesh.Trimesh(outputs[0].astype(np.float32), np.ascontiguousarray(outputs[1]))    
+    mesh = trimesh.Trimesh(outputs[0].astype(np.float32), np.ascontiguousarray(outputs[1]))
+
+    if faces > 0:
+        mesh = simplify_mesh(mesh, faces)
+
     return mesh
 
+def mesh_to_pymesh(vertices, faces):
+    mesh = pymeshlab.Mesh(vertex_matrix=vertices, face_matrix=faces)
+    ms = pymeshlab.MeshSet()
+    ms.add_mesh(mesh)
+    return ms
+
+def pymesh_to_trimesh(mesh):
+    verts = mesh.vertex_matrix()#.tolist()
+    faces = mesh.face_matrix()#.tolist()
+    return trimesh.Trimesh(vertices=verts, faces=faces)  #, vID, fID
+
+def simplify_mesh(mesh: trimesh.Trimesh, n_faces):
+    if mesh.faces.shape[0] > n_faces:
+        ms = mesh_to_pymesh(mesh.vertices, mesh.faces)
+        ms.meshing_merge_close_vertices()
+        ms.meshing_decimation_quadric_edge_collapse(targetfacenum = n_faces)
+        return pymesh_to_trimesh(ms.current_mesh())
+    else:
+        return mesh
 
 if __name__ == "__main__":
     device = "cuda"
@@ -50,6 +75,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=7.0)
+    parser.add_argument("--faces", type=int, default=50000)
+    parser.add_argument("--name", type=str, default="output")
     args = parser.parse_args()
 
     # download pretrained weights
@@ -73,4 +100,5 @@ if __name__ == "__main__":
         seed=args.seed,
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
-    ).export(os.path.join(args.output_dir, "output.glb"))
+        faces=args.faces,
+    ).export(os.path.join(args.output_dir, "%s.glb" % args.name))
