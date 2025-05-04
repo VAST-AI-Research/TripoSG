@@ -231,7 +231,7 @@ with gr.Blocks(title="TripoSG 3D Generation") as demo:
             gr.Markdown("Download:")
             with gr.Row():
                 file_format_dropdown = gr.Dropdown(
-                    choices=["glb", "obj", "stl", "3mf"],
+                    choices=["glb", "obj", "stl", "ply"],
                     value="stl",
                     label="Select Format",
                     interactive=True

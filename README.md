@@ -78,6 +78,8 @@ or from scribble+prompt:
 gradio app:
 ```
 python -m scripts.app
+# or
+python -m scripts.app --port 8081 --server-name 'ip/hostname'
 ```
 
 The required model weights will be automatically downloaded:
