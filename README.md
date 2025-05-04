@@ -75,6 +75,13 @@ or from scribble+prompt:
  python -m scripts.inference_triposg_scribble --image-input assets/example_scribble_data/cat_with_wings.png --prompt "a cat with wings" --scribble-conf 0.3 --output-path output.glb
 ```
 
+gradio app:
+```
+python -m scripts.app
+# or
+python -m scripts.app --port 8081 --server-name 'ip/hostname'
+```
+
 The required model weights will be automatically downloaded:
 - TripoSG (image condition) model from [VAST-AI/TripoSG](https://huggingface.co/VAST-AI/TripoSG) → `pretrained_weights/TripoSG`
 = TripoSG-scribble (scribble+prompt condition) model from [VAST-AI/TripoSG-scribble](https://huggingface.co/VAST-AI/TripoSG-scribble) → `pretrained_weights/TripoSG-scribble`
