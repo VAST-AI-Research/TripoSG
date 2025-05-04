@@ -12,3 +12,4 @@ jaxtyping
 typeguard
 diso
 pymeshlab # Added for face reduction
+gradio
