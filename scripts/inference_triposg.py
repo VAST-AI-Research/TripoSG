@@ -28,13 +28,24 @@ def run_triposg(
     num_inference_steps: int = 50,
     guidance_scale: float = 7.0,
     faces: int = -1,
+    device: str = "cuda",
+    use_flash_decoder: bool = True,
 ) -> trimesh.Scene:
 
-    img_pil = prepare_image(image_input, bg_color=np.array([1.0, 1.0, 1.0]), rmbg_net=rmbg_net)
+    img_pil = prepare_image(image_input, bg_color=np.array([1.0, 1.0, 1.0]), rmbg_net=rmbg_net, device=device)
+
+    effective_use_flash_decoder = use_flash_decoder
+    if device == 'mps' and use_flash_decoder:
+        try:
+            import diso
+            print("Note: Using flash_decoder on MPS. If 'diso' library is not fully compatible, issues might occur or performance might vary.")
+        except ImportError:
+            print("Warning: 'diso' library not found. 'flash_decoder' cannot be used. Falling back to hierarchical_extract_geometry.")
+            effective_use_flash_decoder = False
 
     outputs = pipe(
         image=img_pil,
-        generator=torch.Generator(device=pipe.device).manual_seed(seed),
+        generator=torch.Generator(device=device).manual_seed(seed),
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
     ).samples[0]
@@ -66,8 +77,15 @@ def simplify_mesh(mesh: trimesh.Trimesh, n_faces):
         return mesh
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
+    if torch.backends.mps.is_available():
+        device = "mps"
+        dtype = torch.float32
+    elif torch.cuda.is_available():
+        device = "cuda"
+        dtype = torch.float16
+    else:
+        device = "cpu"
+        dtype = torch.float32
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-input", type=str, required=True)
@@ -76,6 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=7.0)
     parser.add_argument("--faces", type=int, default=-1)
+    parser.add_argument("--use-flash-decoder", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 
     # download pretrained weights
@@ -100,5 +119,7 @@ if __name__ == "__main__":
         num_inference_steps=args.num_inference_steps,
         guidance_scale=args.guidance_scale,
         faces=args.faces,
+        device=device,
+        use_flash_decoder=args.use_flash_decoder,
     ).export(args.output_path)
     print(f"Mesh saved to {args.output_path}")

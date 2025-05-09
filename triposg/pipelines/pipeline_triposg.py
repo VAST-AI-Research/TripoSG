@@ -295,11 +295,22 @@ class TripoSGPipeline(DiffusionPipeline, TransformerDiffusionMixin):
 
 
         # 7. decoder mesh
-        if not use_flash_decoder:
+        effective_use_flash_decoder = use_flash_decoder
+        if self.device.type == 'mps' and use_flash_decoder:
+            try:
+                import diso # type: ignore
+                # If diso imports, we assume it might work, but it's experimental on MPS.
+                # A more robust check would involve testing a small diso operation.
+                logger.warn("Using flash_decoder on MPS. The 'diso' library's compatibility with MPS is not fully guaranteed. If issues arise, consider setting use_flash_decoder=False.")
+            except ImportError:
+                logger.warn("'diso' library not found. 'flash_decoder' cannot be used. Falling back to hierarchical_extract_geometry.")
+                effective_use_flash_decoder = False
+        
+        if not effective_use_flash_decoder:
             geometric_func = lambda x: self.vae.decode(latents, sampled_points=x).sample
             output = hierarchical_extract_geometry(
                 geometric_func,
-                device,
+                self.device,
                 bounds=bounds,
                 dense_octree_depth=dense_octree_depth,
                 hierarchical_octree_depth=hierarchical_octree_depth,
@@ -312,7 +323,7 @@ class TripoSGPipeline(DiffusionPipeline, TransformerDiffusionMixin):
                 bounds=bounds,
                 octree_depth=flash_octree_depth,
             )
-        meshes = [trimesh.Trimesh(mesh_v_f[0].astype(np.float32), mesh_v_f[1]) for mesh_v_f in output]
+        meshes = [trimesh.Trimesh(mesh_v_f[0].astype(np.float32), mesh_v_f[1]) for mesh_v_f in output if mesh_v_f[0] is not None and mesh_v_f[1] is not None]
         
         # Offload all models
         self.maybe_free_model_hooks()
