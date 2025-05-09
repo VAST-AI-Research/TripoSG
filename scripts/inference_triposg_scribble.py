@@ -32,7 +32,7 @@ def run_triposg_scribble(
     outputs = pipe(
         image=img_pil,
         prompt=prompt,
-        generator=torch.Generator(device=pipe.device).manual_seed(seed),
+        generator=torch.Generator(device=pipe.device if hasattr(pipe, 'device') else "cpu").manual_seed(seed),
         num_inference_steps=num_inference_steps,
         guidance_scale=0, # this is a CFG-distilled model
         attention_kwargs={"cross_attention_scale": prompt_confidence, "cross_attention_2_scale": scribble_confidence},
@@ -44,8 +44,14 @@ def run_triposg_scribble(
 
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    dtype = torch.float16 if device != "cpu" else torch.float32
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-input", type=str, required=True)

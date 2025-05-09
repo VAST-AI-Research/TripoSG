@@ -158,7 +158,7 @@ class TripoSGDecoder(nn.Module):
     ):
         logits = model_fn(queries, sample)
         if grad:
-            with torch.autocast(device_type="cuda", dtype=torch.float32):
+            with torch.autocast(device_type=queries.device.type, dtype=torch.float32, enabled=queries.device.type != 'cpu'):
                 if self.grad_type == "numerical":
                     interval = self.grad_interval
                     grad_value = []

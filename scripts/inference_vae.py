@@ -18,14 +18,21 @@ def load_surface(data_path, num_pc=204800):
     ind = rng.choice(surface.shape[0], num_pc, replace=False)
     surface = torch.FloatTensor(surface[ind])
     normal = torch.FloatTensor(normal[ind])
-    surface = torch.cat([surface, normal], dim=-1).unsqueeze(0).cuda()
+    surface = torch.cat([surface, normal], dim=-1).unsqueeze(0)
 
     return surface
 
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    dtype = torch.float16 if device != "cpu" else torch.float32
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--surface-input", type=str, required=True)
     args = parser.parse_args()

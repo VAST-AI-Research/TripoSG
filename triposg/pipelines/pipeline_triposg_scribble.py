@@ -203,7 +203,7 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
         dense_octree_depth: int = 8, 
         hierarchical_octree_depth: int = 9,
         flash_octree_depth: int = 9,
-        use_flash_decoder: bool = True,
+        use_flash_decoder: bool = False, # Defaulting to False due to boundary problems and for MPS compatibility (diso library)
         return_dict: bool = True,
     ):
         self._guidance_scale = guidance_scale
@@ -250,7 +250,7 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
             num_tokens,
             num_channels_latents,
             image_embeds.dtype,
-            device,
+            self.device,
             generator,
             latents,
         )
@@ -327,7 +327,7 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
                 bounds=bounds,
                 octree_depth=flash_octree_depth,
             )
-        meshes = [trimesh.Trimesh(mesh_v_f[0].astype(np.float32), mesh_v_f[1]) for mesh_v_f in output]
+        meshes = [trimesh.Trimesh(mesh_v_f[0].astype(np.float32), mesh_v_f[1]) for mesh_v_f in output if mesh_v_f[0] is not None and mesh_v_f[1] is not None]
         
         # Offload all models
         self.maybe_free_model_hooks()

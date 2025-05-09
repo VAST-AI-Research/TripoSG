@@ -4,10 +4,14 @@ import torch.nn as nn
 import scipy.ndimage
 from skimage import measure
 from einops import repeat
-from diso import DiffDMC
 import torch.nn.functional as F
 
 from triposg.utils.typing import *
+
+try:
+    from diso import DiffDMC 
+except ImportError:
+    DiffDMC = None
 
 def generate_dense_grid_points_gpu(bbox_min: torch.Tensor,
                                    bbox_max: torch.Tensor,
@@ -98,7 +102,7 @@ def find_candidates_band(occupancy_grid: torch.Tensor, band_threshold: float, n_
     return core_mesh_coords 
 
 def expand_edge_region_fast(edge_coords, grid_size):
-    expanded_tensor = torch.zeros(grid_size, grid_size, grid_size, device='cuda', dtype=torch.float16, requires_grad=False)
+    expanded_tensor = torch.zeros(grid_size, grid_size, grid_size, device=edge_coords.device, dtype=torch.float16, requires_grad=False)
     expanded_tensor[edge_coords[:, 0], edge_coords[:, 1], edge_coords[:, 2]] = 1
     if grid_size < 512:
         kernel_size = 5
@@ -186,7 +190,10 @@ def hierarchical_extract_geometry(geometric_func: Callable,
         # breakpoint()
         high_res_occupancy[indices[:, 0], indices[:, 1], indices[:, 2]] = values
         grid_logits = high_res_occupancy
-        torch.cuda.empty_cache()
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+        elif device.type == 'mps':
+            torch.mps.empty_cache()
     mesh_v_f = []
     try:
         print("final grids shape = ", grid_logits.shape)
@@ -195,7 +202,10 @@ def hierarchical_extract_geometry(geometric_func: Callable,
         mesh_v_f = (vertices.astype(np.float32), np.ascontiguousarray(faces))
     except Exception as e:
         print(e)
-        torch.cuda.empty_cache()
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+        elif device.type == 'mps':
+            torch.mps.empty_cache()
         mesh_v_f = (None, None)
 
     return [mesh_v_f]
@@ -463,17 +473,25 @@ def flash_extract_geometry(
     grid_logits = grid_logits[0]
     try:
         print("final grids shape = ", grid_logits.shape)
-        dmc = DiffDMC(dtype=torch.float32).to(grid_logits.device)
-        sdf = -grid_logits / octree_resolution
-        sdf = sdf.to(torch.float32).contiguous()
-        vertices, faces = dmc(sdf, deform=None, return_quads=False, normalize=False)
-        vertices = vertices.detach().cpu().numpy()
-        faces = faces.detach().cpu().numpy()[:, ::-1]        
+        if grid_logits.device.type == 'mps':
+            print("Warning: DiffDMC (diso library) in flash_extract_geometry might not be compatible with MPS. Using skimage.measure.marching_cubes on CPU as a fallback for this specific call if DiffDMC fails or is unavailable.")
+            grid_logits_cpu = grid_logits.float().cpu().numpy()
+            vertices, faces, _, _ = measure.marching_cubes(grid_logits_cpu, mc_level, method="lewiner")
+        else:
+            dmc = DiffDMC(dtype=torch.float32).to(grid_logits.device)
+            sdf = -grid_logits / octree_resolution
+            sdf = sdf.to(torch.float32).contiguous()
+            vertices, faces = dmc(sdf, deform=None, return_quads=False, normalize=False)
+            vertices = vertices.detach().cpu().numpy()
+            faces = faces.detach().cpu().numpy()[:, ::-1]
         vertices = vertices / (2 ** octree_depth) * bbox_size + bbox_min
         mesh_v_f = (vertices.astype(np.float32), np.ascontiguousarray(faces))
     except Exception as e:
         print(e)
-        torch.cuda.empty_cache()
+        if latents.device.type == 'cuda':
+            torch.cuda.empty_cache()
+        elif latents.device.type == 'mps':
+            torch.mps.empty_cache()
         mesh_v_f = (None, None)
 
     return [mesh_v_f]

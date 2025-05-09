@@ -17,7 +17,7 @@ def find_bounding_box(gray_image):
     x, y, w, h = cv2.boundingRect(max_contour)
     return x, y, w, h
 
-def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
+def load_image(img_path: str, bg_color: np.ndarray = None, rmbg_net=None, padding_ratio: float = 0.1, device: str = "cuda"):
     img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         return f"invalid image path {img_path}"
@@ -72,13 +72,13 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
     else:
         return f"invalid image: channels {num_channels}"
     
-    rgb_image_gpu = torch.from_numpy(rgb_image).cuda().float().permute(2, 0, 1) / 255.
+    rgb_image_gpu = torch.from_numpy(rgb_image).to(device).float().permute(2, 0, 1) / 255.
     if alpha is None:
         resize_transform = transforms.Resize((384, 384), antialias=True)
         rgb_image_resized = resize_transform(rgb_image_gpu)
         normalize_image = rgb_image_resized * 2 - 1
 
-        mean_color = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).cuda()
+        mean_color = torch.tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1)
         resize_transform = transforms.Resize((1024, 1024), antialias=True)
         rgb_image_resized = resize_transform(rgb_image_gpu)
         max_value = rgb_image_resized.flatten().max()
@@ -105,7 +105,7 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
         cleaned_alpha = remove_small_objects(labeled_alpha, min_size=200)
         cleaned_alpha = (cleaned_alpha > 0).astype(np.uint8)
         alpha = cleaned_alpha * 255
-        alpha_gpu = torch.from_numpy(cleaned_alpha).cuda().float().unsqueeze(0)
+        alpha_gpu = torch.from_numpy(cleaned_alpha).to(device).float().unsqueeze(0)
         x, y, w, h = find_bounding_box(alpha)
 
     # If alpha is provided, the bounds of all foreground are used
@@ -125,7 +125,7 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
         raise ValueError(f"input image too small")
     
     bg_gray = bg_color[0]
-    bg_color = torch.from_numpy(bg_color).float().cuda().repeat(alpha_gpu.shape[1], alpha_gpu.shape[2], 1).permute(2, 0, 1)
+    bg_color = torch.from_numpy(bg_color).float().to(device).repeat(alpha_gpu.shape[1], alpha_gpu.shape[2], 1).permute(2, 0, 1)
     rgb_image_gpu = rgb_image_gpu * alpha_gpu + bg_color * (1 - alpha_gpu)
     padding_size = [0] * 6
     if w > h:
@@ -140,9 +140,9 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
 
     return padded_tensor
 
-def prepare_image(image_path, bg_color, rmbg_net=None):
+def prepare_image(image_path: str, bg_color: np.ndarray, rmbg_net=None, device: str = "cuda"):
     if os.path.isfile(image_path):
-        img_tensor = load_image(image_path, bg_color=bg_color, rmbg_net=rmbg_net)
+        img_tensor = load_image(image_path, bg_color=bg_color, rmbg_net=rmbg_net, device=device)
         img_np = img_tensor.permute(1,2,0).cpu().numpy()
         img_pil = Image.fromarray((img_np*255).astype(np.uint8))
         
