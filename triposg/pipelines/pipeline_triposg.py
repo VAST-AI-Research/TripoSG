@@ -16,12 +16,12 @@ from transformers import (
     BitImageProcessor,
     Dinov2Model,
 )
-from ..inference_utils import hierarchical_extract_geometry, flash_extract_geometry
+from TripoSG.triposg.inference_utils import hierarchical_extract_geometry, flash_extract_geometry
 
-from ..models.autoencoders import TripoSGVAEModel
-from ..models.transformers import TripoSGDiTModel
-from .pipeline_triposg_output import TripoSGPipelineOutput
-from .pipeline_utils import TransformerDiffusionMixin
+from TripoSG.triposg.models.autoencoders import TripoSGVAEModel
+from TripoSG.triposg.models.transformers import TripoSGDiTModel
+from TripoSG.triposg.pipelines.pipeline_triposg_output import TripoSGPipelineOutput
+from TripoSG.triposg.pipelines.pipeline_utils import TransformerDiffusionMixin
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

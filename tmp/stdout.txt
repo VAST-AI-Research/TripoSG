@@ -1,0 +1,8 @@
+ Volume in drive R is R1G
+ Volume Serial Number is 6A93-01C5
+
+ Directory of R:\projects\stable-diffusion-webui\venv\Scripts
+
+04/26/2025  03:26 PM           268,568 python.exe
+               1 File(s)        268,568 bytes
+               0 Dir(s)  46,982,877,184 bytes free

@@ -12,7 +12,7 @@ from PIL import Image
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from triposg.pipelines.pipeline_triposg import TripoSGPipeline
+from TripoSG.triposg.pipelines.pipeline_triposg import TripoSGPipeline
 from image_process import prepare_image
 from briarmbg import BriaRMBG
 
