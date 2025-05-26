@@ -1,0 +1,26 @@
+services:
+  triposg:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: triposg:latest
+    container_name: triposg
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./:/app
+      - ./pretrained_weights:/app/pretrained_weights
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      - GRADIO_RELOAD=True
+    command: python app.py
