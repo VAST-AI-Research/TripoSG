@@ -15,7 +15,7 @@ from einops import repeat
 # from torch_cluster import fps
 from tqdm import tqdm
 
-from ..attention_processor import FusedTripoSGAttnProcessor2_0, TripoSGAttnProcessor2_0
+from ..attention_processor import FusedTripoSGAttnProcessor2_0, TripoSGAttnProcessor2_0, FlashTripoSGAttnProcessor2_0
 from ..embeddings import FrequencyPositionalEmbedding
 from ..transformers.triposg_transformer import DiTBlock
 from .vae import DiagonalGaussianDistribution
@@ -143,6 +143,12 @@ class TripoSGDecoder(nn.Module):
         self.norm_out = LayerNorm(dim)
         self.proj_out = nn.Linear(dim, out_channels, bias=True)
 
+    def set_topk(self, topk):
+        self.blocks[-1].set_topk(topk)
+
+    def set_flash_processor(self, processor):
+        self.blocks[-1].set_flash_processor(processor)
+
     def query_geometry(
         self,
         model_fn: callable,
@@ -260,6 +266,9 @@ class TripoSGVAEModel(ModelMixin, ConfigMixin):
 
         self.use_slicing = False
         self.slicing_length = 1
+
+    def set_flash_decoder(self):
+        self.decoder.set_flash_processor(FlashTripoSGAttnProcessor2_0())
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.fuse_qkv_projections with FusedAttnProcessor2_0->FusedTripoSGAttnProcessor2_0
     def fuse_qkv_projections(self):

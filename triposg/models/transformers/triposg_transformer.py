@@ -167,6 +167,9 @@ class DiTBlock(nn.Module):
         use_cross_attention: bool = True, # ada layer norm
         cross_attention_dim: Optional[int] = None,
         cross_attention_norm_type: Optional[str] = "fp32_layer_norm",
+        use_cross_attention_2: bool = False,
+        cross_attention_2_dim: Optional[int] = None,
+        cross_attention_2_norm_type: Optional[str] = None,
         dropout=0.0,
         activation_fn: str = "gelu",
         norm_type: str = "fp32_layer_norm",  # TODO
@@ -185,6 +188,7 @@ class DiTBlock(nn.Module):
 
         self.use_self_attention = use_self_attention
         self.use_cross_attention = use_cross_attention
+        self.use_cross_attention_2 = use_cross_attention_2
         self.skip_concat_front = skip_concat_front
         self.skip_norm_last = skip_norm_last
         # Define 3 blocks. Each block has its own normalization layer.
@@ -228,6 +232,23 @@ class DiTBlock(nn.Module):
                 processor=TripoSGAttnProcessor2_0(),
             )
 
+        if use_cross_attention_2:
+            assert cross_attention_2_dim is not None
+
+            self.norm2_2 = FP32LayerNorm(dim, norm_eps, norm_elementwise_affine)
+
+            self.attn2_2 = Attention(
+                query_dim=dim,
+                cross_attention_dim=cross_attention_2_dim,
+                dim_head=dim // num_attention_heads,
+                heads=num_attention_heads,
+                qk_norm="rms_norm" if qk_norm else None,
+                cross_attention_norm=cross_attention_2_norm_type,
+                eps=1e-6,
+                bias=qkv_bias,
+                processor=TripoSGAttnProcessor2_0(),
+            )
+
         # 3. Feed-forward
         self.norm3 = FP32LayerNorm(dim, norm_eps, norm_elementwise_affine)
 
@@ -251,6 +272,13 @@ class DiTBlock(nn.Module):
         self._chunk_size = None
         self._chunk_dim = 0
 
+    def set_topk(self, topk):
+        self.flash_processor.topk = topk
+
+    def set_flash_processor(self, flash_processor):
+        self.flash_processor = flash_processor
+        self.attn2.processor = self.flash_processor
+
     # Copied from diffusers.models.attention.BasicTransformerBlock.set_chunk_feed_forward
     def set_chunk_feed_forward(self, chunk_size: Optional[int], dim: int = 0):
         # Sets chunk feed-forward
@@ -261,13 +289,16 @@ class DiTBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: Optional[torch.Tensor] = None,
+        encoder_hidden_states_2: Optional[torch.Tensor] = None,
         temb: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[torch.Tensor] = None,
         skip: Optional[torch.Tensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
         # Prepare attention kwargs
-        attention_kwargs = attention_kwargs or {}
+        attention_kwargs = attention_kwargs.copy() if attention_kwargs is not None else {}
+        cross_attention_scale = attention_kwargs.pop("cross_attention_scale", 1.0)
+        cross_attention_2_scale = attention_kwargs.pop("cross_attention_2_scale", 1.0)
 
         # Notice that normalization is always applied before the real computation in the following blocks.
         # 0. Long Skip Connection
@@ -300,12 +331,29 @@ class DiTBlock(nn.Module):
 
         # 2. Cross-Attention
         if self.use_cross_attention:
-            hidden_states = hidden_states + self.attn2(
-                self.norm2(hidden_states),
-                encoder_hidden_states=encoder_hidden_states,
-                image_rotary_emb=image_rotary_emb,
-                **attention_kwargs,
-            )
+            if self.use_cross_attention_2:
+                hidden_states = (
+                    hidden_states
+                    + self.attn2(
+                        self.norm2(hidden_states),
+                        encoder_hidden_states=encoder_hidden_states,
+                        image_rotary_emb=image_rotary_emb,
+                        **attention_kwargs,
+                    ) * cross_attention_scale
+                    + self.attn2_2(
+                        self.norm2_2(hidden_states),
+                        encoder_hidden_states=encoder_hidden_states_2,
+                        image_rotary_emb=image_rotary_emb,
+                        **attention_kwargs,
+                    ) * cross_attention_2_scale
+                )
+            else:
+                hidden_states = hidden_states + self.attn2(
+                    self.norm2(hidden_states),
+                    encoder_hidden_states=encoder_hidden_states,
+                    image_rotary_emb=image_rotary_emb,
+                    **attention_kwargs,
+                ) * cross_attention_scale
 
         # FFN Layer ### TODO: switch norm2 and norm3 in the state dict
         mlp_inputs = self.norm3(hidden_states)
@@ -368,6 +416,8 @@ class TripoSGDiTModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         in_channels: int = 64,
         num_layers: int = 21,
         cross_attention_dim: int = 1024,
+        use_cross_attention_2: bool = False,
+        cross_attention_2_dim: Optional[int] = None
     ):
         super().__init__()
         self.out_channels = in_channels
@@ -397,6 +447,9 @@ class TripoSGDiTModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     use_cross_attention=True,
                     cross_attention_dim=cross_attention_dim,
                     cross_attention_norm_type=None,
+                    use_cross_attention_2=use_cross_attention_2,
+                    cross_attention_2_dim=cross_attention_2_dim,
+                    cross_attention_2_norm_type=None,
                     activation_fn="gelu",
                     norm_type="fp32_layer_norm",  # TODO
                     norm_eps=1e-5,
@@ -571,6 +624,7 @@ class TripoSGDiTModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         hidden_states: Optional[torch.Tensor],
         timestep: Union[int, float, torch.LongTensor],
         encoder_hidden_states: Optional[torch.Tensor] = None,
+        encoder_hidden_states_2: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
@@ -637,6 +691,7 @@ class TripoSGDiTModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                     create_custom_forward(block),
                     hidden_states,
                     encoder_hidden_states,
+                    encoder_hidden_states_2,
                     temb,
                     image_rotary_emb,
                     skip,
@@ -647,6 +702,7 @@ class TripoSGDiTModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                 hidden_states = block(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states_2=encoder_hidden_states_2,
                     temb=temb,
                     image_rotary_emb=image_rotary_emb,
                     skip=skip,
