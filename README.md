@@ -53,6 +53,7 @@ Install dependencies:
 ```bash
 # pytorch (select correct CUDA version)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/{your-cuda-version}
+#if your cuda version is 11.8,this code shoule be ：pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118 
 
 # other dependencies
 pip install -r requirements.txt
