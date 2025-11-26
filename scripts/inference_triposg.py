@@ -66,8 +66,8 @@ def simplify_mesh(mesh: trimesh.Trimesh, n_faces):
         return mesh
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
+    device = "mps""
+    dtype = torch.float32
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-input", type=str, required=True)
