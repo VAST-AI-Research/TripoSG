@@ -4,7 +4,10 @@ import torch.nn as nn
 import scipy.ndimage
 from skimage import measure
 from einops import repeat
-from diso import DiffDMC
+try:
+    from diso import DiffDMC  # CUDA-only; needed by the flash decoder path
+except ImportError:  # AMD/ROCm, Apple, CPU: use use_flash_decoder=False (skimage marching cubes)
+    DiffDMC = None
 import torch.nn.functional as F
 
 from triposg.utils.typing import *
@@ -463,6 +466,8 @@ def flash_extract_geometry(
     grid_logits = grid_logits[0]
     try:
         print("final grids shape = ", grid_logits.shape)
+        if DiffDMC is None:
+            raise RuntimeError("diso is not installed (it is CUDA-only); call the pipeline with use_flash_decoder=False")
         dmc = DiffDMC(dtype=torch.float32).to(grid_logits.device)
         sdf = -grid_logits / octree_resolution
         sdf = sdf.to(torch.float32).contiguous()

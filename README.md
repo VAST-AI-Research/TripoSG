@@ -84,6 +84,22 @@ The required model weights will be automatically downloaded:
 
 - CUDA-enabled GPU with at least 8GB VRAM
 
+## Running on AMD GPUs (ROCm)
+
+I run TripoSG on a Radeon RX 6700 XT (12 GB) and two things were in the way: `diso` only builds with CUDA, and the non-flash decoder asks for one huge attention call over the whole 256³ grid, which does not fit in 12 GB without flash attention. Now:
+
+- `diso` is optional. If it is not installed, `use_flash_decoder` defaults to `False` and the mesh comes from the marching-cubes path. With `diso` installed nothing changes.
+- The marching-cubes path queries the grid in chunks (`decode_chunk_size`, 32000 points by default). On my card that gives the exact same mesh as 8000-point chunks in 257 s instead of 609 s, with a 9 GB peak. Lower it if you have less VRAM.
+
+What I tested on: RX 6700 XT 12 GB (gfx1031, so `HSA_OVERRIDE_GFX_VERSION=10.3.0`), Nobara 44 (Fedora based), ROCm 7.1, PyTorch 2.10 for ROCm, Python 3.12, no `diso`.
+
+```bash
+export HSA_OVERRIDE_GFX_VERSION=10.3.0   # only for gfx1031 cards like the 6700 XT / 6750 XT
+python -m scripts.inference_triposg --image-input assets/example_data/hjswed.png
+```
+
+If you see `Memory access fault by GPU` once in a while, that is the ROCm override on consumer cards, not TripoSG; running again works.
+
 ## 📝 Tips
 
 - If you want to use the full VAE module (including the encoder part), you need to uncomment the Line-15 in `triposg/models/autoencoders/autoencoder_kl_triposg.py` and install `torch-cluster`. and run:

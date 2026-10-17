@@ -203,7 +203,8 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
         dense_octree_depth: int = 8, 
         hierarchical_octree_depth: int = 9,
         flash_octree_depth: int = 9,
-        use_flash_decoder: bool = True,
+        use_flash_decoder: Optional[bool] = None,
+        decode_chunk_size: int = 32000,
         return_dict: bool = True,
     ):
         self._guidance_scale = guidance_scale
@@ -309,9 +310,16 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
                 ):
                     progress_bar.update()
 
-        # 7. decoder mesh
+        # 7. decoder mesh (flash decoder needs diso, which is CUDA-only; fall back to marching cubes without it)
+        if use_flash_decoder is None:
+            from ..inference_utils import DiffDMC as _dmc
+            use_flash_decoder = _dmc is not None
         if not use_flash_decoder:
-            geometric_func = lambda x: self.vae.decode(latents, sampled_points=x).sample
+            # Query the dense grid in chunks. Without flash attention (e.g. AMD/ROCm consumer GPUs) one call over the
+            # whole 256^3 grid needs far more than 12 GB; 32k points per call fits and gives the same mesh.
+            geometric_func = lambda x: torch.cat(
+                [self.vae.decode(latents, sampled_points=c).sample for c in x.split(decode_chunk_size, dim=1)], dim=1
+            )
             output = hierarchical_extract_geometry(
                 geometric_func,
                 device,
