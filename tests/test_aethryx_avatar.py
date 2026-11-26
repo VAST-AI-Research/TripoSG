@@ -10,6 +10,7 @@ from aethryx_avatar import (
     analyze_mesh_symmetry,
     build_avatar_scene_graph,
     repair_mesh_copy,
+    retopologize_mesh_copy,
     split_disconnected_components,
 )
 from studio_project import save_project, load_project
@@ -68,6 +69,16 @@ class AvatarSceneGraphTests(unittest.TestCase):
             original = trimesh.load(str(path), force="mesh", process=False)
             self.assertEqual(result["before"]["vertices"], len(original.vertices))
             self.assertGreaterEqual(result["after"]["vertices"], 1)
+
+    def test_retopology_target_is_real_and_dimension_safe(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.glb"
+            output = Path(folder) / "retopo.glb"
+            trimesh.creation.icosphere(subdivisions=3).export(str(path), file_type="glb")
+            result = retopologize_mesh_copy(path, output, 100)
+            self.assertIn(result["status"], ("available", "rejected"))
+            if result["status"] == "available":
+                self.assertLessEqual(result["after"]["faces"], 100)
 
     def test_symmetry_analysis_runs_on_a_real_mesh(self):
         with tempfile.TemporaryDirectory() as folder:

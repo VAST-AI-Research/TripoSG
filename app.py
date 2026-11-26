@@ -1,4 +1,5 @@
 import os
+import copy
 import shutil
 import subprocess
 import sys
@@ -7,7 +8,7 @@ import threading
 import tkinter as tk
 import traceback
 from collections import deque
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import numpy as np
 import trimesh
@@ -33,6 +34,7 @@ from aethryx_avatar import (
     build_avatar_scene_graph,
     export_disconnected_components,
     repair_mesh_copy,
+    retopologize_mesh_copy,
 )
 
 from studio_metadata import (
@@ -80,6 +82,8 @@ class AethryxStudio(tk.Tk):
         self.avatar_nodes = build_avatar_scene_graph()
         self.generation_active = False
         self.model_loading = False
+        self.scene_history = []
+        self.scene_future = []
         self.projection = tk.StringVar(value="persp")
         self.display_mode = tk.StringVar(value="solid")
         self.selection_mode = tk.StringVar(value="object")
@@ -106,6 +110,8 @@ class AethryxStudio(tk.Tk):
         self.bind("<Control-n>", lambda event: self.new_project())
         self.bind("<Control-o>", lambda event: self.open_project())
         self.bind("<Control-s>", lambda event: self.save_current_project())
+        self.bind("<Control-z>", lambda event: self.undo_scene_change())
+        self.bind("<Control-y>", lambda event: self.redo_scene_change())
         self._load_reference_preview()
         self._refresh_system_status()
 
@@ -186,8 +192,8 @@ class AethryxStudio(tk.Tk):
         self.main_menu.add_cascade(label="Archivo", menu=file_menu)
 
         edit_menu = tk.Menu(self.main_menu, **menu_colors)
-        for label in ("Deshacer - proximo", "Rehacer - proximo"):
-            edit_menu.add_command(label=label, state="disabled")
+        edit_menu.add_command(label="Deshacer escena", accelerator="Ctrl+Z", command=self.undo_scene_change)
+        edit_menu.add_command(label="Rehacer escena", accelerator="Ctrl+Y", command=self.redo_scene_change)
         edit_menu.add_separator()
         for label in ("Duplicar objeto - proximo", "Eliminar objeto - proximo", "Preferencias - proximo"):
             edit_menu.add_command(label=label, state="disabled")
@@ -293,6 +299,10 @@ class AethryxStudio(tk.Tk):
         tools_menu.add_command(
             label="Analizar simetría X...",
             command=self.analyze_loaded_symmetry,
+        )
+        tools_menu.add_command(
+            label="Retopología conservadora...",
+            command=self.retopologize_loaded_mesh,
         )
         for label in ("Reparacion - proximo", "Simetria - proximo", "Retopologia - proximo", "Rigging - proximo"):
             tools_menu.add_command(label=label, state="disabled")
@@ -1067,6 +1077,40 @@ class AethryxStudio(tk.Tk):
             "\n".join("- " + finding for finding in result["findings"]),
         )
 
+    def retopologize_loaded_mesh(self):
+        if not self.current_model_path or not os.path.isfile(self.current_model_path):
+            messagebox.showinfo("Retopología", "Importa o genera una malla primero.")
+            return
+        target = simpledialog.askinteger(
+            "Retopología conservadora",
+            "Número objetivo de caras:",
+            initialvalue=25000,
+            minvalue=100,
+            maxvalue=200000,
+            parent=self,
+        )
+        if target is None:
+            return
+        path = filedialog.asksaveasfilename(
+            title="Guardar retopología",
+            defaultextension=".glb",
+            filetypes=[("GLB", "*.glb")],
+        )
+        if not path:
+            return
+        result = retopologize_mesh_copy(self.current_model_path, path, target)
+        if result["status"] != "available":
+            messagebox.showerror("Retopología", result.get("reason", "Operación rechazada"))
+            return
+        after = result["after"]
+        messagebox.showinfo(
+            "Retopología conservadora",
+            f"Antes: {result['before']['faces']} caras\n"
+            f"Después: {after['faces']} caras\n"
+            f"Variación máxima de dimensiones: {result['maximum_dimension_delta']:.3%}\n"
+            f"Watertight: {'sí' if after['watertight'] else 'no'}",
+        )
+
     def repair_loaded_mesh(self):
         if not self.current_model_path or not os.path.isfile(self.current_model_path):
             messagebox.showinfo("Reparación", "Importa o genera una malla primero.")
@@ -1119,6 +1163,14 @@ class AethryxStudio(tk.Tk):
         if result["status"] != "available":
             messagebox.showerror("Componentes geométricos", result["reason"])
             return
+        if self.loaded_scene is None:
+            self.loaded_scene = trimesh.Scene()
+        for index, component in enumerate(result["components"], start=1):
+            try:
+                piece = trimesh.load(component["path"], force="mesh", process=False)
+                self.loaded_scene.geometry[f"component-{index}"] = piece
+            except Exception as exc:
+                self.append_log(f"No se pudo importar el componente: {exc}")
         messagebox.showinfo(
             "Componentes geométricos",
             f"Se exportaron {len(result['components'])} componente(s) desconectado(s).\n"
@@ -1311,6 +1363,41 @@ class AethryxStudio(tk.Tk):
     def open_manual(self):
         if os.path.isfile(README_PATH):
             os.startfile(README_PATH)
+
+    def checkpoint_scene_change(self):
+        if self.loaded_scene is None:
+            return
+        self.scene_history.append(copy.deepcopy(self.loaded_scene))
+        if len(self.scene_history) > 20:
+            self.scene_history.pop(0)
+        self.scene_future.clear()
+
+    def undo_scene_change(self):
+        if not self.scene_history:
+            self.status.set("No hay cambios de escena para deshacer.")
+            return
+        if self.loaded_scene is not None:
+            self.scene_future.append(copy.deepcopy(self.loaded_scene))
+        self.loaded_scene = self.scene_history.pop()
+        self._refresh_scene_after_history()
+
+    def redo_scene_change(self):
+        if not self.scene_future:
+            self.status.set("No hay cambios de escena para rehacer.")
+            return
+        if self.loaded_scene is not None:
+            self.scene_history.append(copy.deepcopy(self.loaded_scene))
+        self.loaded_scene = self.scene_future.pop()
+        self._refresh_scene_after_history()
+
+    def _refresh_scene_after_history(self):
+        try:
+            if self.current_model_path and os.path.isfile(self.current_model_path):
+                self.load_model(self.current_model_path)
+            self.status.set("Cambio de escena restaurado.")
+        except Exception as exc:
+            self.status.set("No se pudo restaurar el cambio de escena.")
+            self.append_log(str(exc))
 
     def reset_workspace(self):
         self.geometry("1420x920")

@@ -91,6 +91,10 @@ See `AETHRYX_GENESIS_PHASE3.md` and `test_assets/anime/genesis-phase3/` for
 the original T-pose reference, independent VRAM metrics, corrected cameras,
 the repaired-copy test and real component export.
 
+See `AETHRYX_GENESIS_PHASE4.md` and `test_assets/anime/genesis-phase4/` for
+the detailed authorized reference evaluation, TripoSR build status, real
+retopology/repair safety, component import and scene undo support.
+
 See `AETHRYX_ADAPTIVE_ENGINE.md` for hardware profiles, FP16/INT8/INT4 status,
 CPU offloading, CUDA OOM recovery, basic edit mode and benchmark requirements.
 

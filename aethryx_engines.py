@@ -44,6 +44,11 @@ def engine_catalog():
             "Revisar código, pesos y licencia antes de integrar",
             "NO EVALUADO", True, True, False, False, True, False, "candidate",
         ),
+        EngineCapabilities(
+            "triposr", "TripoSR / alternativa monovista",
+            "MIT de código y pesos según model card",
+            "COMPILACIÓN WINDOWS PENDIENTE", True, False, False, False, True, False, "1.0",
+        ),
     ]
 
 
