@@ -68,3 +68,6 @@ tiempo, calidad visual, VRAM pico, VRAM final, caras, vértices, fallos y OOM.
 - 4, 6, 8, 16 y 24 GiB no están certificados.
 - CPU offloading puede aumentar significativamente el tiempo.
 - El modo de edición básica no prueba todavía el visor PyVista con <=8 GiB RAM.
+- 4, 6, 8, 16 y 24 GiB quedan suspendidos por decisión del director.
+- El hardware de referencia activo es exclusivamente RTX 5070 de 12 GiB
+  hasta completar el avatar humanoide VRChat.

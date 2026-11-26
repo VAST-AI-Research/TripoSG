@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import trimesh
+from aethryx_avatar import build_avatar_scene_graph
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,25 @@ def get_mesh_statistics(model_path):
         "faces": int(face_count),
         "bounds_min": [float(value) for value in bounds[0]],
         "bounds_max": [float(value) for value in bounds[1]],
+    }
+
+
+def get_avatar_scene_graph(context):
+    if not isinstance(context, dict):
+        return {"status": "unavailable", "reason": "Contexto de proyecto no proporcionado"}
+    project_id = context.get("project_id")
+    revision = context.get("revision")
+    if not project_id or not revision:
+        return {"status": "unavailable", "reason": "Faltan project_id o revision"}
+    nodes = build_avatar_scene_graph(
+        context.get("references"),
+        context.get("mesh_stats"),
+    )
+    return {
+        "status": "available",
+        "project_id": project_id,
+        "revision": revision,
+        "nodes": nodes,
     }
 
 
@@ -117,6 +137,19 @@ def analyze_project_diagnostics(context):
 
 
 TOOL_REGISTRY = {
+    "get_avatar_scene_graph": ToolDefinition(
+        "get_avatar_scene_graph",
+        "Devuelve el scene graph humanoide y el estado real de sus componentes.",
+        {
+            "project_id": "string",
+            "revision": "string",
+            "references": "array",
+            "mesh_stats": "object",
+        },
+        ("read",),
+        True,
+        True,
+    ),
     "list_scene_nodes": ToolDefinition(
         "list_scene_nodes",
         "Lista nodos reales y recuentos básicos de geometría.",
@@ -191,6 +224,8 @@ def execute_tool(name, inputs, project_context=None, write_allowed=False):
             return get_project_context(context)
         if name == "analyze_project_diagnostics":
             return analyze_project_diagnostics(context)
+        if name == "get_avatar_scene_graph":
+            return get_avatar_scene_graph(context)
     if name == "list_scene_nodes":
         return list_scene_nodes(inputs.get("model_path", ""))
     if name == "get_mesh_statistics":

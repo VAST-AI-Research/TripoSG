@@ -180,6 +180,18 @@ def _mask_rle(mask):
     return runs
 
 
+def _rectangle_mask(width, height, bbox):
+    import numpy as np
+    mask = np.zeros((height, width), dtype=np.uint8)
+    x0, y0, x1, y1 = bbox
+    left = max(0, min(width - 1, int(x0 * width)))
+    top = max(0, min(height - 1, int(y0 * height)))
+    right = max(left + 1, min(width, int(x1 * width)))
+    bottom = max(top + 1, min(height, int(y1 * height)))
+    mask[top:bottom, left:right] = 1
+    return mask
+
+
 def _onnx_segmentation_regions(source, width, height):
     model_path = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_MODEL", "")
     labels_text = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_LABELS", "")
@@ -366,6 +378,69 @@ def _mediapipe_reference_regions(source, width, height):
                         "keypoints": points,
                         "metadata": {"provider": "mediapipe-pose", "landmark_count": len(points)},
                     })
+                    component_specs = (
+                        ("face_detail", (0, 1, 2, 5, 4, 6, 7, 8, 9, 10), "face"),
+                        ("eyes_detail", (1, 2, 3, 4, 5, 6), "eyes"),
+                        ("clothing_detail", (11, 12, 23, 24), "clothing"),
+                        ("hair_detail", (0, 1, 2, 3, 4, 5, 6, 7, 8), "hair"),
+                    )
+                    point_by_index = {
+                        index: {"x": float(landmark.x), "y": float(landmark.y)}
+                        for index, landmark in enumerate(landmarks)
+                    }
+                    for view, indices, component_name in component_specs:
+                        selected = [
+                            point_by_index[index]
+                            for index in indices
+                            if index in point_by_index
+                            and 0 <= point_by_index[index]["x"] <= 1
+                            and 0 <= point_by_index[index]["y"] <= 1
+                        ]
+                        if len(selected) < 2:
+                            continue
+                        comp_xs = [point["x"] for point in selected]
+                        comp_ys = [point["y"] for point in selected]
+                        bbox = [
+                            max(0.0, min(comp_xs)),
+                            max(0.0, min(comp_ys)),
+                            min(1.0, max(comp_xs)),
+                            min(1.0, max(comp_ys)),
+                        ]
+                        if component_name == "hair":
+                            face_bottom = bbox[3]
+                            bbox = [
+                                max(0.0, bbox[0]),
+                                max(0.0, max(0.0, bbox[1] - max(0.08, (face_bottom - bbox[1]) * 0.8))),
+                                min(1.0, bbox[2]),
+                                min(1.0, face_bottom),
+                            ]
+                        component_mask = _rectangle_mask(width, height, bbox)
+                        regions.append({
+                            "id": f"ref-{uuid4().hex[:16]}",
+                            "path": source,
+                            "view": view,
+                            "bbox": bbox,
+                            "primary": False,
+                            "origin": "mediapipe-pose-heuristic",
+                            "confidence": None,
+                            "confirmed": False,
+                            "keypoints": [
+                                {"name": f"{component_name}-{index}", "x": point["x"], "y": point["y"]}
+                                for index, point in zip(indices, selected)
+                            ],
+                            "mask": {
+                                "format": "rle_u8",
+                                "width": width,
+                                "height": height,
+                                "class_index": 1,
+                                "runs": _mask_rle(component_mask),
+                            },
+                            "metadata": {
+                                "provider": "mediapipe-pose-heuristic",
+                                "component": component_name,
+                                "status": "provisional-region-not-semantic-mask",
+                            },
+                        })
         except Exception as exc:
             return regions, f"MediaPipe pose no estuvo disponible: {exc}"
 

@@ -56,7 +56,19 @@ def _relative(value, parent):
     except ValueError:  # Windows volumes differ
         return str(path)
 
-def save_project(path, *, image, model, output, steps, faces, seed, guidance, references=()):
+def save_project(
+    path,
+    *,
+    image,
+    model,
+    output,
+    steps,
+    faces,
+    seed,
+    guidance,
+    references=(),
+    avatar_nodes=None,
+):
     validate_settings(steps, faces, seed, guidance)
     path = Path(path).resolve()
     if path.suffix.lower() != ".aeth":
@@ -64,9 +76,10 @@ def save_project(path, *, image, model, output, steps, faces, seed, guidance, re
     reference_regions = validate_reference_regions(references)
     for region in reference_regions:
         region["path"] = _relative(region["path"], path.parent)
-    data = {"format": "AETHRYX", "version": 1,
+    data = {"format": "AETHRYX", "version": 2,
             "image": _relative(image, path.parent), "model": _relative(model, path.parent),
             "output": _relative(output, path.parent), "references": reference_regions,
+            "avatar_nodes": avatar_nodes or [],
             "settings": {"steps": steps, "faces": faces, "seed": seed, "guidance": guidance}}
     temp = None
     try:
@@ -83,7 +96,7 @@ def load_project(path):
     if path.stat().st_size > 1024 * 1024:
         raise ValueError("Proyecto demasiado grande.")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("format") != "AETHRYX" or data.get("version") != 1:
+    if not isinstance(data, dict) or data.get("format") != "AETHRYX" or data.get("version") not in (1, 2):
         raise ValueError("Formato de proyecto no compatible.")
     settings = data.get("settings")
     if not isinstance(settings, dict):
@@ -114,4 +127,8 @@ def load_project(path):
             }
         )
     result["references"] = validate_reference_regions(resolved_references)
+    avatar_nodes = data.get("avatar_nodes", [])
+    if not isinstance(avatar_nodes, list):
+        raise ValueError("El scene graph del avatar no es válido.")
+    result["avatar_nodes"] = avatar_nodes
     return result

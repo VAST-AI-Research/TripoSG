@@ -79,6 +79,10 @@ See `AETHRYX_VISION_PHASE4.md` and `test_assets/anime/` for the real local anime
 test, PyVista preview, TripoSG GLB metrics, license review, defects, and exact
 VRAM measurements. Weights remain excluded from Git.
 
+See `AETHRYX_ANATOMY_PHASE5.md` for the persistent humanoid scene graph,
+provisional pose-derived face/eye/hair/clothing regions, and honest rigging
+component status.
+
 See `AETHRYX_ADAPTIVE_ENGINE.md` for hardware profiles, FP16/INT8/INT4 status,
 CPU offloading, CUDA OOM recovery, basic edit mode and benchmark requirements.
 

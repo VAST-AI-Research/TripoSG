@@ -92,6 +92,7 @@ def validate_reference_regions(regions):
             "opencv-haar",
             "mediapipe-face",
             "mediapipe-pose",
+            "mediapipe-pose-heuristic",
             "onnx-segmentation",
         ):
             raise ValueError("Origen de referencia no compatible.")

@@ -28,6 +28,7 @@ from aethryx_engines import engine_catalog
 from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
 from aethryx_viewer import viewer_catalog
 from aethryx_adaptive import adaptive_plan_dict, build_adaptive_plan
+from aethryx_avatar import build_avatar_scene_graph
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -71,6 +72,7 @@ class AethryxStudio(tk.Tk):
         self.guidance = tk.DoubleVar(value=7.0)
         self.project_path = None
         self.reference_regions = []
+        self.avatar_nodes = build_avatar_scene_graph()
         self.generation_active = False
         self.model_loading = False
         self.projection = tk.StringVar(value="persp")
@@ -252,6 +254,7 @@ class AethryxStudio(tk.Tk):
         scene_menu.add_command(label="Alternar visibilidad seleccionada", command=self.toggle_selected_visibility)
         scene_menu.add_command(label="Aislar seleccion", command=self.isolate_selection)
         scene_menu.add_command(label="Mostrar todos los objetos", command=self.show_all_objects)
+        scene_menu.add_command(label="Scene graph del avatar...", command=self.show_avatar_scene_graph)
         scene_menu.add_command(label="Renombrar objeto - proximo", state="disabled")
         self.main_menu.add_cascade(label="Escena", menu=scene_menu)
 
@@ -519,6 +522,10 @@ class AethryxStudio(tk.Tk):
             self._clear_scene()
             self.project_path = path
             self.reference_regions = data["references"]
+            self.avatar_nodes = data.get("avatar_nodes") or build_avatar_scene_graph(
+                self.reference_regions,
+                self.model_stats,
+            )
             if any(region["primary"] for region in self.reference_regions):
                 self.reference_regions = select_primary_region(self.reference_regions)
             self.image_path.set(data["image"]); self.output_path.set(data["output"])
@@ -545,7 +552,8 @@ class AethryxStudio(tk.Tk):
             save_project(path, image=self.image_path.get(), model=self.current_model_path,
                          output=self.output_path.get(), steps=self.steps.get(), faces=self.faces.get(),
                          seed=self.seed.get(), guidance=self.guidance.get(),
-                         references=self.reference_regions)
+                         references=self.reference_regions,
+                         avatar_nodes=self.avatar_nodes)
             self.project_path = path
             self.title(f"{PRODUCT_NAME} — {os.path.basename(path)}")
             self.status.set("Proyecto guardado. Los recursos se conservan como archivos externos.")
@@ -612,6 +620,10 @@ class AethryxStudio(tk.Tk):
                     self.reference_regions,
                     preferred_view="front",
                 )
+            self.avatar_nodes = build_avatar_scene_graph(
+                self.reference_regions,
+                self.model_stats,
+            )
         except ValueError as exc:
             messagebox.showerror("Referencias no válidas", str(exc))
             return
@@ -1035,6 +1047,18 @@ class AethryxStudio(tk.Tk):
         messagebox.showinfo(
             "Diagnóstico local",
             "\n".join("- " + finding for finding in result["findings"]),
+        )
+
+    def show_avatar_scene_graph(self):
+        nodes = build_avatar_scene_graph(self.reference_regions, self.model_stats)
+        self.avatar_nodes = nodes
+        lines = [
+            f"{node['name']}: {node['status']} ({node['source']})"
+            for node in nodes
+        ]
+        messagebox.showinfo(
+            "Scene graph humanoide",
+            "\n".join(lines),
         )
 
     def show_adaptive_engine(self):
