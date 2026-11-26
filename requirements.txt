@@ -8,6 +8,7 @@ omegaconf
 scikit-image
 scipy
 numpy>=1.24,<2
+mediapipe>=0.10.21,<0.11
 matplotlib>=3.8,<4
 Pillow>=10
 peft==0.14.0

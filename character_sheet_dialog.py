@@ -1,5 +1,6 @@
 import os
 import tkinter as tk
+import threading
 from tkinter import messagebox, ttk
 from uuid import uuid4
 
@@ -116,6 +117,16 @@ class CharacterSheetDialog(tk.Toplevel):
             text="Confirmar región seleccionada",
             command=self.confirm_region,
         ).pack(fill="x", pady=(0, 12))
+        ttk.Button(
+            controls,
+            text="Reclasificar selección",
+            command=self.reclassify_region,
+        ).pack(fill="x", pady=(5, 0))
+        ttk.Button(
+            controls,
+            text="Aplicar recorte nuevo",
+            command=self.replace_selected_region,
+        ).pack(fill="x", pady=(5, 0))
 
         self.region_tree = ttk.Treeview(
             controls,
@@ -278,7 +289,23 @@ class CharacterSheetDialog(tk.Toplevel):
         self._render_image()
 
     def analyze_automatic(self):
-        result = analyze_reference_image(self.image_path)
+        if getattr(self, "analysis_running", False):
+            return
+        self.analysis_running = True
+        self.status.set("Analizando la imagen localmente en segundo plano...")
+        thread = threading.Thread(
+            target=self._run_automatic_analysis,
+            args=(self.image_path,),
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_automatic_analysis(self, path):
+        result = analyze_reference_image(path)
+        self.after(0, lambda: self._finish_automatic_analysis(result))
+
+    def _finish_automatic_analysis(self, result):
+        self.analysis_running = False
         if result["status"] == "unavailable":
             self.status.set(f"Análisis automático no disponible: {result['reason']}.")
             return
@@ -344,6 +371,64 @@ class CharacterSheetDialog(tk.Toplevel):
         )
         self._render_image()
 
+    def reclassify_region(self):
+        selected = self.region_tree.selection()
+        if not selected:
+            self.status.set("Selecciona el recorte que quieras reclasificar.")
+            return
+        reverse_labels = {label: key for key, label in REFERENCE_VIEW_LABELS.items()}
+        view = reverse_labels.get(self.view_var.get())
+        if not view:
+            return
+        region_id = selected[0]
+        region = next((item for item in self.regions if item["id"] == region_id), None)
+        if region is None:
+            return
+        if view in FULL_BODY_VIEWS:
+            region["confirmed"] = True
+        else:
+            region["primary"] = False
+        region["view"] = view
+        region["origin"] = "manual"
+        try:
+            self.regions = validate_reference_regions(self.regions)
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
+        self._refresh_region_tree()
+        self.status.set(
+            f"Recorte reclasificado como {REFERENCE_VIEW_LABELS[view]} "
+            "y marcado como clasificación manual."
+        )
+        self._render_image()
+
+    def replace_selected_region(self):
+        selected = self.region_tree.selection()
+        if not selected:
+            self.status.set("Selecciona una región y arrastra para definir su nuevo recorte.")
+            return
+        if not self.pending_bbox:
+            self.status.set("Arrastra sobre la imagen y después pulsa «Aplicar recorte nuevo».")
+            return
+        region_id = selected[0]
+        region = next((item for item in self.regions if item["id"] == region_id), None)
+        if region is None:
+            return
+        region["bbox"] = self.pending_bbox
+        region["confirmed"] = True
+        region["origin"] = "manual"
+        if region["view"] not in FULL_BODY_VIEWS:
+            region["primary"] = False
+        try:
+            self.regions = validate_reference_regions(self.regions)
+        except ValueError as exc:
+            self.status.set(str(exc))
+            return
+        self.pending_bbox = None
+        self._refresh_region_tree()
+        self.status.set("Recorte reemplazado y confirmado manualmente.")
+        self._render_image()
+
     def remove_region(self):
         selected = self.region_tree.selection()
         if not selected:
@@ -366,8 +451,11 @@ class CharacterSheetDialog(tk.Toplevel):
             return
         region = next((item for item in self.regions if item["id"] == selected[0]), None)
         if region:
-            self.pending_bbox = None
-            self.status.set(f"Región seleccionada: {REFERENCE_VIEW_LABELS[region['view']]}.")
+            self.pending_bbox = list(region["bbox"])
+            self.status.set(
+                f"Región seleccionada: {REFERENCE_VIEW_LABELS[region['view']]}. "
+                "Arrastra para reemplazar su recorte."
+            )
             self._render_image()
 
     def accept(self):

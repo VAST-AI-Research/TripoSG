@@ -85,6 +85,51 @@ class CharacterSheetTests(unittest.TestCase):
             self.assertIn(result["status"], ("available", "completed", "unavailable"))
             self.assertIsInstance(result["regions"], list)
 
+    def test_synthetic_anime_reference_has_real_explicit_result(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "anime.png"
+            image = Image.new("RGB", (240, 320), "#e8e1d8")
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((70, 30, 170, 150), fill="#f1c7a9", outline="#171717", width=3)
+            draw.polygon(
+                [(70, 70), (90, 20), (150, 20), (170, 70), (145, 50), (120, 42), (95, 52)],
+                fill="#d4a0b4",
+            )
+            draw.ellipse((90, 80, 112, 96), fill="white", outline="#171717")
+            draw.ellipse((128, 80, 150, 96), fill="white", outline="#171717")
+            draw.ellipse((98, 84, 108, 94), fill="#55aadd")
+            draw.ellipse((136, 84, 146, 94), fill="#55aadd")
+            draw.rectangle((85, 150, 155, 280), fill="#6b78a8", outline="#171717", width=3)
+            image.save(path)
+            result = analyze_reference_image(path)
+            self.assertIn(result["status"], ("available", "completed", "unavailable"))
+            for region in result["regions"]:
+                self.assertIn(region["origin"], ("opencv-haar", "mediapipe-face", "mediapipe-pose"))
+                self.assertFalse(region["confirmed"])
+
+    def test_pose_region_metadata_is_supported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pose.png"
+            Image.new("RGB", (64, 64), "white").save(path)
+            region = {
+                "id": "ref-pose",
+                "path": str(path),
+                "view": "other",
+                "bbox": [0.1, 0.1, 0.9, 0.9],
+                "primary": False,
+                "origin": "mediapipe-pose",
+                "confidence": None,
+                "confirmed": False,
+                "keypoints": [
+                    {"name": "pose-0", "x": 0.5, "y": 0.2},
+                ],
+                "metadata": {"provider": "mediapipe-pose", "landmark_count": 1},
+            }
+            validated = validate_reference_regions([region])
+            self.assertEqual(validated[0]["keypoints"][0]["name"], "pose-0")
+            self.assertEqual(validated[0]["metadata"]["provider"], "mediapipe-pose")
+
 
 if __name__ == "__main__":
     unittest.main()

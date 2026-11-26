@@ -20,7 +20,7 @@ from character_sheet import REFERENCE_VIEW_LABELS, crop_reference, validate_refe
 from character_sheet_dialog import CharacterSheetDialog
 from studio_project import validate_settings, validate_glb, save_project, load_project
 from aethryx_engines import engine_catalog
-from aethryx_tools import tool_catalog
+from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -257,6 +257,10 @@ class AethryxStudio(tk.Tk):
         tools_menu.add_command(
             label="Motores y herramientas disponibles...",
             command=self.show_engine_inventory,
+        )
+        tools_menu.add_command(
+            label="Diagnostico local del proyecto...",
+            command=self.show_project_diagnostics,
         )
         for label in ("Reparacion - proximo", "Simetria - proximo", "Retopologia - proximo", "Rigging - proximo"):
             tools_menu.add_command(label=label, state="disabled")
@@ -977,6 +981,34 @@ class AethryxStudio(tk.Tk):
         messagebox.showinfo(
             "Motores y herramientas",
             "Motores\n" + "\n".join(engines) + "\n\nHerramientas\n" + "\n".join(tools),
+        )
+
+    def show_project_diagnostics(self):
+        context = {
+            "project_id": self.project_path or "unsaved-project",
+            "revision": "1",
+            "references": self.reference_regions,
+            "mesh_stats": self.model_stats,
+            "model": self.current_model_path,
+            "image": self.image_path.get(),
+        }
+        result = execute_tool(
+            "analyze_project_diagnostics",
+            {
+                "project_id": context["project_id"],
+                "revision": context["revision"],
+                "references": context["references"],
+                "mesh_stats": context["mesh_stats"],
+                "model": context["model"],
+            },
+            context,
+        )
+        if result["status"] != "available":
+            messagebox.showinfo("Diagnóstico local", result.get("reason", "No disponible"))
+            return
+        messagebox.showinfo(
+            "Diagnóstico local",
+            "\n".join("- " + finding for finding in result["findings"]),
         )
 
     def open_output_folder(self):

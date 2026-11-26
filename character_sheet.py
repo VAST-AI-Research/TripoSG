@@ -67,6 +67,8 @@ def validate_reference_regions(regions):
         origin = region.get("origin", "manual")
         confidence = region.get("confidence")
         confirmed = region.get("confirmed", True)
+        keypoints = region.get("keypoints")
+        metadata = region.get("metadata")
         if not isinstance(region_id, str) or not region_id or len(region_id) > 64:
             raise ValueError("Identificador de referencia inválido.")
         if region_id in seen_ids:
@@ -79,13 +81,29 @@ def validate_reference_regions(regions):
             raise ValueError("El estado de vista principal debe ser booleano.")
         if primary and view not in FULL_BODY_VIEWS:
             raise ValueError("Solo una vista de cuerpo completo puede ser principal.")
-        if origin not in ("manual", "opencv-haar"):
+        if origin not in (
+            "manual",
+            "opencv-haar",
+            "mediapipe-face",
+            "mediapipe-pose",
+        ):
             raise ValueError("Origen de referencia no compatible.")
         if confidence is not None:
             if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
                 raise ValueError("La confianza debe estar entre 0 y 1.")
         if type(confirmed) is not bool:
             raise ValueError("El estado de confirmación debe ser booleano.")
+        if keypoints is not None:
+            if not isinstance(keypoints, list) or any(
+                not isinstance(point, dict)
+                or set(("x", "y", "name")).difference(point)
+                or type(point["x"]) not in (int, float)
+                or type(point["y"]) not in (int, float)
+                for point in keypoints
+            ):
+                raise ValueError("Los puntos de pose no son válidos.")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("Los metadatos de referencia no son válidos.")
 
         path = Path(source).expanduser().resolve()
         if not path.is_file():
@@ -100,6 +118,8 @@ def validate_reference_regions(regions):
                 "origin": origin,
                 "confidence": confidence,
                 "confirmed": confirmed,
+                "keypoints": keypoints,
+                "metadata": metadata,
             }
         )
         seen_ids.add(region_id)

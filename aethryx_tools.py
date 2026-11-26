@@ -12,6 +12,7 @@ class ToolDefinition:
     input_schema: dict
     permissions: tuple
     available: bool
+    project_context_required: bool = False
 
 
 def list_scene_nodes(model_path):
@@ -57,6 +58,64 @@ def validate_avatar_placeholder():
     }
 
 
+def get_project_context(context):
+    if not isinstance(context, dict):
+        return {"status": "unavailable", "reason": "Contexto de proyecto no proporcionado"}
+    project_id = context.get("project_id")
+    revision = context.get("revision")
+    if not project_id or not revision:
+        return {"status": "unavailable", "reason": "Faltan project_id o revision"}
+    allowed = {}
+    for key in ("image", "model", "output", "references", "settings", "mesh_stats"):
+        if key in context:
+            allowed[key] = context[key]
+    return {
+        "status": "available",
+        "project_id": project_id,
+        "revision": revision,
+        "context": allowed,
+    }
+
+
+def analyze_project_diagnostics(context):
+    project = get_project_context(context)
+    if project["status"] != "available":
+        return project
+    data = project["context"]
+    references = data.get("references", [])
+    full_views = {
+        region.get("view")
+        for region in references
+        if isinstance(region, dict) and region.get("confirmed")
+    }
+    missing = [
+        view for view in ("front", "side", "back", "three_quarter")
+        if view not in full_views
+    ]
+    findings = []
+    if not references:
+        findings.append("No hay referencias registradas.")
+    if missing:
+        findings.append("Vistas completas no confirmadas: " + ", ".join(missing) + ".")
+    mesh_stats = data.get("mesh_stats")
+    if not mesh_stats:
+        findings.append("No hay una malla cargada o estadisticas 3D disponibles.")
+    else:
+        vertices = mesh_stats.get("vertices", 0)
+        faces = mesh_stats.get("faces", 0)
+        findings.append(f"Malla real cargada: {vertices} vertices y {faces} caras.")
+    if not data.get("model"):
+        findings.append("No hay modelo 3D importado en el proyecto.")
+    return {
+        "status": "available",
+        "project_id": project["project_id"],
+        "revision": project["revision"],
+        "findings": findings,
+        "missing_full_views": missing,
+        "source": "deterministic-local",
+    }
+
+
 TOOL_REGISTRY = {
     "list_scene_nodes": ToolDefinition(
         "list_scene_nodes",
@@ -79,8 +138,63 @@ TOOL_REGISTRY = {
         ("read",),
         False,
     ),
+    "get_project_context": ToolDefinition(
+        "get_project_context",
+        "Devuelve solo el contexto de proyecto autorizado para lectura.",
+        {
+            "project_id": "string",
+            "revision": "string",
+            "fields": "array<string>",
+        },
+        ("read",),
+        True,
+        True,
+    ),
+    "analyze_project_diagnostics": ToolDefinition(
+        "analyze_project_diagnostics",
+        "Produce diagnosticos locales deterministas basados en referencias y malla.",
+        {
+            "project_id": "string",
+            "revision": "string",
+            "references": "array",
+            "mesh_stats": "object",
+            "model": "string",
+        },
+        ("read",),
+        True,
+        True,
+    ),
 }
 
 
 def tool_catalog():
     return [asdict(tool) for tool in TOOL_REGISTRY.values()]
+
+
+def execute_tool(name, inputs, project_context=None, write_allowed=False):
+    tool = TOOL_REGISTRY.get(name)
+    if tool is None:
+        return {"status": "unavailable", "reason": "Herramienta no registrada"}
+    if not tool.available:
+        return {"status": "unavailable", "reason": "Herramienta no implementada"}
+    if not isinstance(inputs, dict):
+        return {"status": "error", "reason": "Entrada invalida"}
+    if "write" in tool.permissions and not write_allowed:
+        return {"status": "denied", "reason": "La herramienta requiere permiso de escritura"}
+    if tool.project_context_required:
+        context = dict(project_context or {})
+        context.update({
+            key: value for key, value in inputs.items()
+            if key in ("project_id", "revision", "references", "mesh_stats", "model")
+        })
+        if name == "get_project_context":
+            return get_project_context(context)
+        if name == "analyze_project_diagnostics":
+            return analyze_project_diagnostics(context)
+    if name == "list_scene_nodes":
+        return list_scene_nodes(inputs.get("model_path", ""))
+    if name == "get_mesh_statistics":
+        return get_mesh_statistics(inputs.get("model_path", ""))
+    if name == "validate_avatar":
+        return validate_avatar_placeholder()
+    return {"status": "unavailable", "reason": "Sin ejecutor implementado"}
