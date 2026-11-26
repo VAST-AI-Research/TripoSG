@@ -1,5 +1,5 @@
 import os
-import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +15,8 @@ from PIL import Image, ImageTk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+from studio_project import validate_settings, validate_glb, save_project, load_project
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -53,7 +55,12 @@ class AethryxStudio(tk.Tk):
         self.image_path = tk.StringVar(value=os.path.join(ROOT, "assets", "example_data", "hjswed.png"))
         self.output_path = tk.StringVar(value=os.path.join(ROOT, "output.glb"))
         self.steps = tk.IntVar(value=50)
-        self.faces = tk.IntVar(value=5000)
+        self.faces = tk.IntVar(value=-1)
+        self.seed = tk.IntVar(value=42)
+        self.guidance = tk.DoubleVar(value=7.0)
+        self.project_path = None
+        self.generation_active = False
+        self.model_loading = False
         self.projection = tk.StringVar(value="persp")
         self.display_mode = tk.StringVar(value="solid")
         self.selection_mode = tk.StringVar(value="object")
@@ -76,6 +83,10 @@ class AethryxStudio(tk.Tk):
         self._configure_styles()
         self._build_menu()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.bind("<Control-n>", lambda event: self.new_project())
+        self.bind("<Control-o>", lambda event: self.open_project())
+        self.bind("<Control-s>", lambda event: self.save_current_project())
         self._load_reference_preview()
         self._refresh_system_status()
 
@@ -142,16 +153,17 @@ class AethryxStudio(tk.Tk):
         self.config(menu=self.main_menu)
 
         file_menu = tk.Menu(self.main_menu, **menu_colors)
-        file_menu.add_command(label="Nuevo proyecto (.aeth) - proximo", state="disabled")
-        file_menu.add_command(label="Abrir proyecto... - proximo", state="disabled")
-        file_menu.add_command(label="Guardar proyecto - proximo", state="disabled")
+        file_menu.add_command(label="Nuevo proyecto (.aeth)", accelerator="Ctrl+N", command=self.new_project)
+        file_menu.add_command(label="Abrir proyecto...", accelerator="Ctrl+O", command=self.open_project)
+        file_menu.add_command(label="Guardar proyecto", accelerator="Ctrl+S", command=self.save_current_project)
+        file_menu.add_command(label="Guardar proyecto como...", command=lambda: self.save_current_project(True))
         file_menu.add_separator()
         file_menu.add_command(label="Importar imagen de referencia...", command=self.choose_image)
         file_menu.add_command(label="Importar malla 3D...", command=self.choose_model)
         file_menu.add_command(label="Exportar escena original como GLB...", command=self.export_model)
         file_menu.add_command(label="Archivos recientes - proximo", state="disabled")
         file_menu.add_separator()
-        file_menu.add_command(label="Salir", command=self.destroy)
+        file_menu.add_command(label="Salir", command=self.close_window)
         self.main_menu.add_cascade(label="Archivo", menu=file_menu)
 
         edit_menu = tk.Menu(self.main_menu, **menu_colors)
@@ -385,10 +397,15 @@ class AethryxStudio(tk.Tk):
         ttk.Label(settings, text="Pasos", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Spinbox(settings, from_=10, to=100, textvariable=self.steps, width=8).grid(row=1, column=0, sticky="ew", pady=(3, 8))
         ttk.Label(settings, text="Limite de caras", style="Muted.TLabel").grid(row=2, column=0, sticky="w")
-        ttk.Spinbox(settings, from_=1000, to=100000, increment=1000, textvariable=self.faces, width=8).grid(
+        ttk.Spinbox(settings, from_=-1, to=2000000, increment=1000, textvariable=self.faces, width=8).grid(
             row=3, column=0, sticky="ew", pady=(3, 8)
         )
 
+        ttk.Label(settings, text="-1 conserva el detalle original", style="Muted.TLabel").grid(row=4, column=0, sticky="w")
+        ttk.Label(settings, text="Semilla", style="Muted.TLabel").grid(row=5, column=0, sticky="w")
+        ttk.Spinbox(settings, from_=0, to=2147483647, textvariable=self.seed, width=10).grid(row=6, column=0, sticky="ew")
+        ttk.Label(settings, text="Guidance", style="Muted.TLabel").grid(row=7, column=0, sticky="w")
+        ttk.Spinbox(settings, from_=0, to=20, increment=0.5, textvariable=self.guidance, width=8).grid(row=8, column=0, sticky="ew")
         self.progress = ttk.Progressbar(panel, mode="determinate", maximum=100)
         self.progress.pack(fill="x", pady=(4, 6))
         self.generate_button = ttk.Button(
@@ -423,7 +440,99 @@ class AethryxStudio(tk.Tk):
         except (OSError, ValueError) as exc:
             self.append_log(f"No se pudo mostrar la imagen: {exc}")
 
+    def _workspace_available(self):
+        if self.generation_active or self.model_loading:
+            self.status.set("Espera a que termine la operación actual.")
+            return False
+        return True
+
+    def _clear_scene(self):
+        self.load_request_id += 1
+        self.model_loading = False
+        self.loaded_scene = None
+        self.current_model_path = None
+        self.model_parts = []
+        self.model_stats = {}
+        self.mesh_artists = []
+        self.tree_to_part.clear()
+        self.part_to_tree.clear()
+        for item in self.scene_tree.get_children():
+            self.scene_tree.delete(item)
+        self.model_axes.clear()
+        self.model_axes.set_axis_off()
+        self.model_canvas.draw_idle()
+        self._update_object_inspector()
+
+    def new_project(self):
+        if not self._workspace_available():
+            return
+        if not messagebox.askyesno("Nuevo proyecto", "¿Crear un proyecto nuevo? Guarda antes la configuración que quieras conservar. Los archivos existentes no se eliminan."):
+            return
+        self._clear_scene()
+        self.project_path = None
+        self.image_path.set("")
+        self.output_path.set("")
+        self.steps.set(50); self.faces.set(-1); self.seed.set(42); self.guidance.set(7.0)
+        self._load_reference_preview()
+        self.title(PRODUCT_NAME)
+        self.status.set("Proyecto nuevo.")
+
+    def open_project(self):
+        if not self._workspace_available():
+            return
+        path = filedialog.askopenfilename(filetypes=[("Proyecto AETHRYX", "*.aeth")])
+        if not path:
+            return
+        try:
+            data = load_project(path)
+            if data["model"] and os.path.splitext(data["model"])[1].lower() not in SUPPORTED_MODELS:
+                raise ValueError("Formato de malla no compatible.")
+            if not messagebox.askyesno("Abrir proyecto", "¿Reemplazar la configuración actual? Los archivos existentes se conservan."):
+                return
+            self._clear_scene()
+            self.project_path = path
+            self.image_path.set(data["image"]); self.output_path.set(data["output"])
+            for key in ("steps", "faces", "seed", "guidance"):
+                getattr(self, key).set(data["settings"][key])
+            self._load_reference_preview()
+            self.title(f"{PRODUCT_NAME} — {os.path.basename(path)}")
+            if data["model"]:
+                self.load_model(data["model"])
+            else:
+                self.status.set("Proyecto abierto.")
+        except Exception as exc:
+            messagebox.showerror("Abrir proyecto", str(exc))
+
+    def save_current_project(self, save_as=False):
+        if not self._workspace_available():
+            return
+        path = self.project_path if not save_as else None
+        if not path:
+            path = filedialog.asksaveasfilename(defaultextension=".aeth", filetypes=[("Proyecto AETHRYX", "*.aeth")])
+        if not path:
+            return
+        try:
+            save_project(path, image=self.image_path.get(), model=self.current_model_path,
+                         output=self.output_path.get(), steps=self.steps.get(), faces=self.faces.get(),
+                         seed=self.seed.get(), guidance=self.guidance.get())
+            self.project_path = path
+            self.title(f"{PRODUCT_NAME} — {os.path.basename(path)}")
+            self.status.set("Proyecto guardado. Los recursos se conservan como archivos externos.")
+        except Exception as exc:
+            messagebox.showerror("Guardar proyecto", str(exc))
+
+    def close_window(self):
+        if self.generation_active:
+            messagebox.showinfo("Generación activa", "Cancela la generación y espera a que termine antes de cerrar.")
+            return
+        if self.model_loading:
+            messagebox.showinfo("Carga activa", "Espera a que termine la carga antes de cerrar.")
+            return
+        self.destroy()
+
     def choose_image(self):
+        if not self._workspace_available():
+            return
         path = filedialog.askopenfilename(
             title="Importar imagen de referencia",
             filetypes=[("Imagenes", "*.png *.jpg *.jpeg *.webp *.bmp"), ("Todos los archivos", "*.*")],
@@ -443,6 +552,8 @@ class AethryxStudio(tk.Tk):
             self.output_path.set(path)
 
     def choose_model(self):
+        if not self._workspace_available():
+            return
         path = filedialog.askopenfilename(
             title="Importar malla 3D",
             filetypes=[
@@ -463,7 +574,7 @@ class AethryxStudio(tk.Tk):
 
         self.load_request_id += 1
         request_id = self.load_request_id
-        self.current_model_path = path
+        self.model_loading = True
         self.status.set(f"Cargando malla: {os.path.basename(path)}")
         self.append_log(f"Importando malla: {path}")
         threading.Thread(target=self._prepare_model, args=(request_id, path), daemon=True).start()
@@ -563,6 +674,7 @@ class AethryxStudio(tk.Tk):
     def _show_model(self, request_id, path, scene, parts, stats):
         if request_id != self.load_request_id:
             return
+        self.model_loading = False
         self.loaded_scene = scene
         self.model_parts = parts
         self.model_stats = stats
@@ -609,6 +721,7 @@ class AethryxStudio(tk.Tk):
     def _model_load_failed(self, request_id, error):
         if request_id != self.load_request_id:
             return
+        self.model_loading = False
         self.status.set("No se pudo cargar la malla")
         self.append_log(f"Error al importar malla: {error}")
         messagebox.showerror("Error al importar malla", error)
@@ -793,6 +906,8 @@ class AethryxStudio(tk.Tk):
             self.status.set("La carpeta de salida todavia no existe.")
 
     def export_model(self):
+        if not self._workspace_available():
+            return
         if self.loaded_scene is None:
             self.status.set("Importa una malla antes de exportar.")
             return
@@ -804,7 +919,11 @@ class AethryxStudio(tk.Tk):
         if not path:
             return
         try:
-            self._write_scene_glb(self.loaded_scene, path)
+            if self.current_model_path and self.current_model_path.lower().endswith(".glb"):
+                # Preserve the original bytes, including skin/morph/animation data not supported by trimesh.
+                self._copy_original_glb(self.current_model_path, path)
+            else:
+                self._write_scene_glb(self.loaded_scene, path)
             self.status.set(f"Escena original exportada: {os.path.basename(path)}")
             self.append_log(f"Exportacion GLB completada: {path}")
         except Exception as exc:
@@ -813,12 +932,28 @@ class AethryxStudio(tk.Tk):
             messagebox.showerror("Error al exportar", str(exc))
 
     @staticmethod
+    def _copy_original_glb(source, path):
+        if os.path.realpath(source) == os.path.realpath(path):
+            return
+        directory = os.path.dirname(os.path.abspath(path))
+        handle, temp_path = tempfile.mkstemp(prefix=".aethryx-", suffix=".glb", dir=directory)
+        os.close(handle)
+        try:
+            shutil.copyfile(source, temp_path)
+            validate_glb(temp_path)
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    @staticmethod
     def _write_scene_glb(scene, path):
         directory = os.path.dirname(os.path.abspath(path))
         handle, temp_path = tempfile.mkstemp(prefix=".aethryx-", suffix=".glb", dir=directory)
         os.close(handle)
         try:
             scene.export(temp_path, file_type="glb")
+            validate_glb(temp_path)
             os.replace(temp_path, path)
         finally:
             if os.path.exists(temp_path):
@@ -916,6 +1051,8 @@ class AethryxStudio(tk.Tk):
         self.log_line_count = 0
 
     def generate(self):
+        if not self._workspace_available():
+            return
         image = self.image_path.get().strip()
         output = self.output_path.get().strip()
         if not os.path.isfile(image):
@@ -931,19 +1068,20 @@ class AethryxStudio(tk.Tk):
             messagebox.showerror("Entorno no encontrado", "Instala primero las dependencias con requirements.txt.")
             return
         try:
-            steps = int(self.steps.get())
-            faces = int(self.faces.get())
-        except (ValueError, tk.TclError):
-            messagebox.showerror("Parametros no validos", "Pasos y limite de caras deben ser numeros enteros.")
+            steps, faces = self.steps.get(), self.faces.get()
+            seed, guidance = self.seed.get(), self.guidance.get()
+            validate_settings(steps, faces, seed, guidance)
+            output = os.path.abspath(output)
+            if os.path.exists(output) and not messagebox.askyesno("Reemplazar GLB", f"¿Reemplazar el archivo existente si la generación es válida?\n{output}"):
+                return
+            os.makedirs(os.path.dirname(output), exist_ok=True)
+        except (ValueError, OSError, tk.TclError) as exc:
+            messagebox.showerror("Configuración no válida", str(exc))
             return
-        if not 1 <= steps <= 100 or faces < -1:
-            messagebox.showerror("Parametros no validos", "Pasos: 1-100. Caras: -1 o un entero positivo.")
-            return
-
-        output = os.path.abspath(output)
-        os.makedirs(os.path.dirname(output), exist_ok=True)
+        self.generation_active = True
         self.cancel_event = threading.Event()
-        self.progress["value"] = 0
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
         self.generate_button.state(["disabled"])
         self.cancel_button.state(["!disabled"])
         self.status.set("Preparando generacion...")
@@ -951,7 +1089,7 @@ class AethryxStudio(tk.Tk):
         self.append_log(f"Salida: {output}")
         thread = threading.Thread(
             target=self._run_generation,
-            args=(image, output, steps, faces, self.cancel_event),
+            args=(image, output, steps, faces, seed, guidance, self.cancel_event),
             daemon=True,
         )
         thread.start()
@@ -968,7 +1106,7 @@ class AethryxStudio(tk.Tk):
                 self.append_log(f"No se pudo cancelar el proceso: {exc}")
         self.status.set("Cancelando generacion...")
 
-    def _run_generation(self, image, output, steps, faces, cancel_event):
+    def _run_generation(self, image, output, steps, faces, seed, guidance, cancel_event):
         directory = os.path.dirname(output)
         temp_path = None
         process = None
@@ -992,6 +1130,8 @@ class AethryxStudio(tk.Tk):
                 str(steps),
                 "--faces",
                 str(faces),
+                "--seed", str(seed),
+                "--guidance-scale", str(guidance),
             ]
             if cancel_event.is_set():
                 self.after(0, self._generation_cancelled)
@@ -1012,16 +1152,13 @@ class AethryxStudio(tk.Tk):
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             self.generation_process = process
+            if cancel_event.is_set() and process.poll() is None:
+                process.terminate()
             recent_output = deque(maxlen=40)
             for line in process.stdout:
                 recent_output.append(line)
                 self.after(0, lambda text=line: self.append_log(text))
-                match = re.search(r"(\d{1,3})%", line)
-                if match:
-                    progress = min(100, int(match.group(1)))
-                    self.after(0, lambda value=progress: self.progress.configure(value=value))
-                    self.after(0, lambda value=progress: self.status.set(f"Generando: {value}%"))
-                elif "Loading pipeline" in line:
+                if "Loading pipeline" in line:
                     self.after(0, lambda: self.status.set("Cargando componentes del modelo..."))
                 elif "step " in line.lower():
                     self.after(0, lambda: self.status.set("Reconstruyendo geometria 3D..."))
@@ -1030,6 +1167,13 @@ class AethryxStudio(tk.Tk):
             if cancel_event.is_set():
                 self.after(0, self._generation_cancelled)
             elif process.returncode == 0 and temp_path and os.path.isfile(temp_path):
+                validate_glb(temp_path)
+                candidate = trimesh.load(temp_path, force="scene")
+                if not any(isinstance(mesh, trimesh.Trimesh) and len(mesh.faces) and np.isfinite(mesh.vertices).all() for mesh in candidate.geometry.values()):
+                    raise ValueError("La salida no contiene una malla válida.")
+                if cancel_event.is_set():
+                    self.after(0, self._generation_cancelled)
+                    return
                 os.replace(temp_path, output)
                 temp_path = None
                 self.after(0, lambda: self._generation_finished(output))
@@ -1047,6 +1191,9 @@ class AethryxStudio(tk.Tk):
                     pass
 
     def _generation_finished(self, output):
+        self.generation_active = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=100)
         self.generate_button.state(["!disabled"])
         self.cancel_button.state(["disabled"])
         self.status.set(f"Generacion completada: {output}")
@@ -1054,12 +1201,18 @@ class AethryxStudio(tk.Tk):
         self.load_model(output)
 
     def _generation_cancelled(self):
+        self.generation_active = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=0)
         self.generate_button.state(["!disabled"])
         self.cancel_button.state(["disabled"])
         self.status.set("Generacion cancelada; se conservo cualquier salida anterior.")
         self.append_log("Generacion cancelada. El archivo temporal se descarto.")
 
     def _generation_failed(self, error):
+        self.generation_active = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=0)
         self.generate_button.state(["!disabled"])
         self.cancel_button.state(["disabled"])
         self.status.set("Error durante la generacion")
