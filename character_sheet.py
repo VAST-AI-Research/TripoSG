@@ -1,4 +1,5 @@
 from math import ceil, floor, isfinite
+from numbers import Integral, Real
 from pathlib import Path
 
 from PIL import Image
@@ -22,11 +23,15 @@ MAX_REFERENCE_REGIONS = 128
 
 
 def validate_bbox(bbox):
+    if hasattr(bbox, "tolist"):
+        bbox = bbox.tolist()
     if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
         raise ValueError("El recorte debe contener cuatro coordenadas.")
-    if any(type(value) not in (int, float) or not isfinite(value) for value in bbox):
+    if any(not isinstance(value, (Real, Integral)) for value in bbox):
         raise ValueError("Las coordenadas del recorte deben ser números finitos.")
     x0, y0, x1, y1 = (float(value) for value in bbox)
+    if not all(isfinite(value) for value in (x0, y0, x1, y1)):
+        raise ValueError("Las coordenadas del recorte deben ser números finitos.")
     if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
         raise ValueError("El recorte debe estar dentro de la imagen y tener área.")
     return [x0, y0, x1, y1]
@@ -86,10 +91,11 @@ def validate_reference_regions(regions):
             "opencv-haar",
             "mediapipe-face",
             "mediapipe-pose",
+            "onnx-segmentation",
         ):
             raise ValueError("Origen de referencia no compatible.")
         if confidence is not None:
-            if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
+            if not isinstance(confidence, (Real, Integral)) or not 0 <= float(confidence) <= 1:
                 raise ValueError("La confianza debe estar entre 0 y 1.")
         if type(confirmed) is not bool:
             raise ValueError("El estado de confirmación debe ser booleano.")
@@ -97,8 +103,8 @@ def validate_reference_regions(regions):
             if not isinstance(keypoints, list) or any(
                 not isinstance(point, dict)
                 or set(("x", "y", "name")).difference(point)
-                or type(point["x"]) not in (int, float)
-                or type(point["y"]) not in (int, float)
+                or not isinstance(point["x"], (Real, Integral))
+                or not isinstance(point["y"], (Real, Integral))
                 for point in keypoints
             ):
                 raise ValueError("Los puntos de pose no son válidos.")
@@ -128,6 +134,45 @@ def validate_reference_regions(regions):
     if primary_count > 1:
         raise ValueError("Solo puede haber una vista principal.")
     return validated
+
+
+def select_primary_region(regions, preferred_view="front"):
+    """Choose exactly one full-body primary using explicit confirmation and view priority."""
+    if not isinstance(regions, (list, tuple)):
+        raise ValueError("Las referencias no son una lista.")
+    regions = validate_reference_regions(regions)
+    full_body = [
+        region for region in regions
+        if region["view"] in FULL_BODY_VIEWS
+    ]
+    if not full_body:
+        return []
+
+    priority = (preferred_view,) + tuple(
+        view for view in ("front", "three_quarter", "side", "back")
+        if view != preferred_view
+    )
+    candidates = [
+        region for region in full_body
+        if region["confirmed"]
+    ] or full_body
+    selected = None
+    for view in priority:
+        selected = next(
+            (region for region in candidates if region["view"] == view),
+            None,
+        )
+        if selected is not None:
+            break
+
+    if selected is None:
+        selected = candidates[0]
+    result = []
+    for region in regions:
+        copied = dict(region)
+        copied["primary"] = copied["id"] == selected["id"]
+        result.append(copied)
+    return validate_reference_regions(result)
 
 
 def crop_reference(source, bbox):

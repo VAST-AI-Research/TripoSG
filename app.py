@@ -16,11 +16,17 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-from character_sheet import REFERENCE_VIEW_LABELS, crop_reference, validate_reference_regions
+from character_sheet import (
+    REFERENCE_VIEW_LABELS,
+    crop_reference,
+    select_primary_region,
+    validate_reference_regions,
+)
 from character_sheet_dialog import CharacterSheetDialog
 from studio_project import validate_settings, validate_glb, save_project, load_project
 from aethryx_engines import engine_catalog
 from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
+from aethryx_viewer import viewer_catalog
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -508,6 +514,8 @@ class AethryxStudio(tk.Tk):
             self._clear_scene()
             self.project_path = path
             self.reference_regions = data["references"]
+            if any(region["primary"] for region in self.reference_regions):
+                self.reference_regions = select_primary_region(self.reference_regions)
             self.image_path.set(data["image"]); self.output_path.set(data["output"])
             for key in ("steps", "faces", "seed", "guidance"):
                 getattr(self, key).set(data["settings"][key])
@@ -594,6 +602,11 @@ class AethryxStudio(tk.Tk):
                 region["primary"] = False
         try:
             self.reference_regions = validate_reference_regions(other_sources + dialog.result)
+            if any(region["primary"] for region in self.reference_regions):
+                self.reference_regions = select_primary_region(
+                    self.reference_regions,
+                    preferred_view="front",
+                )
         except ValueError as exc:
             messagebox.showerror("Referencias no válidas", str(exc))
             return
@@ -978,9 +991,17 @@ class AethryxStudio(tk.Tk):
         for tool in tool_catalog():
             state = "disponible" if tool["available"] else "no disponible"
             tools.append(f"{tool['name']}: {state}")
+        viewers = []
+        for viewer in viewer_catalog():
+            state = "disponible" if viewer.available else "no disponible"
+            viewers.append(
+                f"{viewer.name}: {state}; GPU={viewer.gpu_accelerated}; {viewer.reason}"
+            )
         messagebox.showinfo(
             "Motores y herramientas",
-            "Motores\n" + "\n".join(engines) + "\n\nHerramientas\n" + "\n".join(tools),
+            "Motores\n" + "\n".join(engines)
+            + "\n\nHerramientas\n" + "\n".join(tools)
+            + "\n\nVisores\n" + "\n".join(viewers),
         )
 
     def show_project_diagnostics(self):

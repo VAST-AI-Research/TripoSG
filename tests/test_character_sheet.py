@@ -7,6 +7,7 @@ from PIL import Image
 from character_sheet import (
     crop_reference,
     normalize_bbox,
+    select_primary_region,
     validate_bbox,
     validate_reference_regions,
 )
@@ -105,8 +106,65 @@ class CharacterSheetTests(unittest.TestCase):
             result = analyze_reference_image(path)
             self.assertIn(result["status"], ("available", "completed", "unavailable"))
             for region in result["regions"]:
-                self.assertIn(region["origin"], ("opencv-haar", "mediapipe-face", "mediapipe-pose"))
+                self.assertIn(region["origin"], (
+                    "opencv-haar",
+                    "mediapipe-face",
+                    "mediapipe-pose",
+                    "onnx-segmentation",
+                ))
                 self.assertFalse(region["confirmed"])
+
+    def test_numpy_coordinates_are_accepted_by_bbox_validation(self):
+        import numpy as np
+        result = validate_bbox(np.array([0.1, 0.2, 0.8, 0.9], dtype=np.float32))
+        self.assertTrue(all(type(value) is float for value in result))
+        for actual, expected in zip(result, (0.1, 0.2, 0.8, 0.9)):
+            self.assertAlmostEqual(actual, expected, places=6)
+
+    def test_primary_selection_across_multiple_images_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            image_a = root / "a.png"
+            image_b = root / "b.png"
+            Image.new("RGB", (32, 32), "white").save(image_a)
+            Image.new("RGB", (32, 32), "white").save(image_b)
+            regions = [
+                {
+                    "id": "side-a",
+                    "path": str(image_a),
+                    "view": "side",
+                    "bbox": [0.1, 0.1, 0.9, 0.9],
+                    "primary": False,
+                    "confirmed": True,
+                },
+                {
+                    "id": "front-b",
+                    "path": str(image_b),
+                    "view": "front",
+                    "bbox": [0.1, 0.1, 0.9, 0.9],
+                    "primary": True,
+                    "confirmed": True,
+                },
+            ]
+            selected = select_primary_region(regions)
+            primaries = [region["id"] for region in selected if region["primary"]]
+            self.assertEqual(primaries, ["front-b"])
+
+    def test_mediapipe_tasks_api_is_detected_but_weights_remain_optional(self):
+        import mediapipe as mp
+        self.assertTrue(hasattr(mp, "tasks"))
+        self.assertTrue(hasattr(mp.tasks, "vision"))
+        self.assertTrue(hasattr(mp.tasks.vision, "PoseLandmarker"))
+
+    def test_semantic_segmentation_is_unavailable_until_a_local_model_is_configured(self):
+        import os
+        os.environ.pop("AETHRYX_SEMANTIC_SEGMENTATION_MODEL", None)
+        os.environ.pop("AETHRYX_SEMANTIC_SEGMENTATION_LABELS", None)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "character.png"
+            Image.new("RGB", (128, 128), "white").save(path)
+            result = analyze_reference_image(path)
+            self.assertNotIn("onnx-segmentation", result.get("providers", []))
 
     def test_pose_region_metadata_is_supported(self):
         with tempfile.TemporaryDirectory() as folder:

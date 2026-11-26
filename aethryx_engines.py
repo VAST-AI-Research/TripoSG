@@ -1,5 +1,6 @@
 """Intercambiable engine contracts and local, dependency-light implementations."""
 from dataclasses import asdict, dataclass
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -135,13 +136,22 @@ def analyze_reference_image(source):
 
     mediapipe_regions, mediapipe_reason = _mediapipe_reference_regions(source, width, height)
     regions.extend(mediapipe_regions)
+    segmentation_regions, segmentation_reason = _onnx_segmentation_regions(source, width, height)
+    regions.extend(segmentation_regions)
     if regions:
         return {
             "status": "available",
-            "reason": "Detecciones locales disponibles" if mediapipe_regions else
-                      "Rostros frontales detectados por Haar",
+            "reason": (
+                "Detecciones locales disponibles"
+                if mediapipe_regions or segmentation_regions
+                else "Rostros frontales detectados por Haar"
+            ),
             "regions": regions,
-            "providers": ["opencv-haar"] + (["mediapipe"] if mediapipe_regions else []),
+            "providers": (
+                ["opencv-haar"]
+                + (["mediapipe"] if mediapipe_regions else [])
+                + (["onnx-segmentation"] if segmentation_regions else [])
+            ),
         }
     return {
         "status": "completed",
@@ -151,75 +161,183 @@ def analyze_reference_image(source):
     }
 
 
+def _onnx_segmentation_regions(source, width, height):
+    model_path = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_MODEL", "")
+    labels_text = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_LABELS", "")
+    if not model_path or not labels_text:
+        return [], "Segmentación semántica no configurada"
+    model = Path(model_path)
+    if not model.is_file():
+        return [], "Modelo ONNX de segmentación no encontrado"
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return [], "OpenCV no está disponible para segmentación"
+
+    labels = [label.strip() for label in labels_text.split(",") if label.strip()]
+    label_to_view = {
+        "body": "other",
+        "torso": "clothing_detail",
+        "face": "face_detail",
+        "hair": "hair_detail",
+        "eye": "eyes_detail",
+        "eyes": "eyes_detail",
+        "mouth": "mouth_detail",
+        "clothing": "clothing_detail",
+        "clothes": "clothing_detail",
+        "accessory": "accessory_detail",
+        "accessories": "accessory_detail",
+    }
+    try:
+        net = cv2.dnn.readNetFromONNX(str(model))
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        with Image.open(source) as pil_image:
+            rgb = np.asarray(pil_image.convert("RGB"))
+        blob = cv2.dnn.blobFromImage(
+            rgb,
+            scalefactor=1.0 / 255.0,
+            size=(512, 512),
+            mean=(0, 0, 0),
+            swapRB=True,
+            crop=False,
+        )
+        net.setInput(blob)
+        output = net.forward()
+        if output.ndim == 4:
+            mask = np.argmax(output[0], axis=0)
+        elif output.ndim == 3:
+            mask = np.argmax(output, axis=0)
+        else:
+            return [], "El modelo ONNX devolvió una forma de máscara no compatible"
+        mask = cv2.resize(
+            mask.astype(np.uint8),
+            (width, height),
+            interpolation=cv2.INTER_NEAREST,
+        )
+        regions = []
+        for class_index, label in enumerate(labels):
+            view = label_to_view.get(label.lower())
+            if view is None:
+                continue
+            ys, xs = np.where(mask == class_index)
+            if xs.size == 0:
+                continue
+            x0, x1 = float(xs.min()), float(xs.max() + 1)
+            y0, y1 = float(ys.min()), float(ys.max() + 1)
+            regions.append({
+                "id": f"ref-{uuid4().hex[:16]}",
+                "path": str(source),
+                "view": view,
+                "bbox": [
+                    max(0.0, x0 / width),
+                    max(0.0, y0 / height),
+                    min(1.0, x1 / width),
+                    min(1.0, y1 / height),
+                ],
+                "primary": False,
+                "origin": "onnx-segmentation",
+                "confidence": None,
+                "confirmed": False,
+                "metadata": {
+                    "provider": "onnx-segmentation",
+                    "label": label,
+                    "model": str(model),
+                },
+            })
+        if not regions:
+            return [], "El modelo ONNX no produjo regiones compatibles con el esquema"
+        return regions, "Segmentación ONNX local producida"
+    except Exception as exc:
+        return [], f"Segmentación ONNX no disponible: {exc}"
+
+
 def _mediapipe_reference_regions(source, width, height):
     try:
         import mediapipe as mp
     except ImportError:
         return [], "MediaPipe no está instalado; Haar es la alternativa disponible"
 
-    import numpy as np
+    pose_model = os.environ.get("AETHRYX_MEDIAPIPE_POSE_MODEL", "")
+    face_model = os.environ.get("AETHRYX_MEDIAPIPE_FACE_MODEL", "")
+    if not pose_model and not face_model:
+        return [], (
+            "MediaPipe 0.10 Tasks está instalado, pero no hay pesos locales "
+            "autorizados configurados; usa Haar hasta incorporar modelos"
+        )
 
+    import numpy as np
+    source = str(source)
     regions = []
+
     with Image.open(source) as pil_image:
         rgb = np.asarray(pil_image.convert("RGB"))
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-    solutions = getattr(mp, "solutions", None)
-    if solutions is None:
-        return [], "Esta instalación de MediaPipe no expone proveedores de imagen compatibles"
+    if pose_model:
+        try:
+            if not Path(pose_model).is_file():
+                raise FileNotFoundError("Modelo pose no encontrado")
+            base = mp.tasks.BaseOptions(model_asset_path=pose_model)
+            options = mp.tasks.vision.PoseLandmarkerOptions(
+                base_options=base,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
+            )
+            with mp.tasks.vision.PoseLandmarker.create_from_options(options) as landmarker:
+                result = landmarker.detect(mp_image)
+            pose_landmarks = getattr(result, "pose_landmarks", None)
+            if pose_landmarks:
+                landmarks = pose_landmarks[0]
+                points = []
+                xs = []
+                ys = []
+                for index, landmark in enumerate(landmarks):
+                    x = float(landmark.x)
+                    y = float(landmark.y)
+                    if 0 <= x <= 1 and 0 <= y <= 1:
+                        xs.append(x)
+                        ys.append(y)
+                        points.append({"name": f"pose-{index}", "x": x, "y": y})
+                if xs and ys:
+                    regions.append({
+                        "id": f"ref-{uuid4().hex[:16]}",
+                        "path": source,
+                        "view": "other",
+                        "bbox": [
+                            max(0.0, min(xs)),
+                            max(0.0, min(ys)),
+                            min(1.0, max(xs)),
+                            min(1.0, max(ys)),
+                        ],
+                        "primary": False,
+                        "origin": "mediapipe-pose",
+                        "confidence": None,
+                        "confirmed": False,
+                        "keypoints": points,
+                        "metadata": {"provider": "mediapipe-pose", "landmark_count": len(points)},
+                    })
+        except Exception as exc:
+            return regions, f"MediaPipe pose no estuvo disponible: {exc}"
 
-    try:
-        with solutions.pose.Pose(
-            static_image_mode=True,
-            model_complexity=1,
-            min_detection_confidence=0.5,
-        ) as pose:
-            result = pose.process(rgb)
-        if result.pose_landmarks:
-            points = []
-            xs = []
-            ys = []
-            for index, landmark in enumerate(result.pose_landmarks.landmark):
-                x = float(landmark.x)
-                y = float(landmark.y)
-                if 0 <= x <= 1 and 0 <= y <= 1:
-                    xs.append(x)
-                    ys.append(y)
-                    points.append({"name": f"pose-{index}", "x": x, "y": y})
-            if xs and ys:
+    if face_model:
+        try:
+            if not Path(face_model).is_file():
+                raise FileNotFoundError("Modelo facial no encontrado")
+            base = mp.tasks.BaseOptions(model_asset_path=face_model)
+            options = mp.tasks.vision.FaceLandmarkerOptions(
+                base_options=base,
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
+                num_faces=5,
+            )
+            with mp.tasks.vision.FaceLandmarker.create_from_options(options) as landmarker:
+                result = landmarker.detect(mp_image)
+            for face in getattr(result, "face_landmarks", []):
+                xs = [float(point.x) for point in face]
+                ys = [float(point.y) for point in face]
                 regions.append({
                     "id": f"ref-{uuid4().hex[:16]}",
-                    "path": str(source),
-                    "view": "other",
-                    "bbox": [
-                        max(0.0, min(xs)),
-                        max(0.0, min(ys)),
-                        min(1.0, max(xs)),
-                        min(1.0, max(ys)),
-                    ],
-                    "primary": False,
-                    "origin": "mediapipe-pose",
-                    "confidence": None,
-                    "confirmed": False,
-                    "keypoints": points,
-                    "metadata": {"provider": "mediapipe-pose", "landmark_count": len(points)},
-                })
-    except Exception as exc:
-        return regions, f"MediaPipe pose no estuvo disponible: {exc}"
-
-    try:
-        with solutions.face_mesh.FaceMesh(
-            static_image_mode=True,
-            max_num_faces=5,
-            refine_landmarks=True,
-        ) as face_mesh:
-            result = face_mesh.process(rgb)
-        if result.multi_face_landmarks:
-            for face in result.multi_face_landmarks:
-                xs = [float(point.x) for point in face.landmark]
-                ys = [float(point.y) for point in face.landmark]
-                regions.append({
-                    "id": f"ref-{uuid4().hex[:16]}",
-                    "path": str(source),
+                    "path": source,
                     "view": "face_detail",
                     "bbox": [
                         max(0.0, min(xs)),
@@ -233,12 +351,12 @@ def _mediapipe_reference_regions(source, width, height):
                     "confirmed": False,
                     "keypoints": [
                         {"name": f"face-{index}", "x": float(point.x), "y": float(point.y)}
-                        for index, point in enumerate(face.landmark)
+                        for index, point in enumerate(face)
                     ],
-                    "metadata": {"provider": "mediapipe-face", "landmark_count": len(face.landmark)},
+                    "metadata": {"provider": "mediapipe-face", "landmark_count": len(face)},
                 })
-    except Exception as exc:
-        return regions, f"MediaPipe face no estuvo disponible: {exc}"
+        except Exception as exc:
+            return regions, f"MediaPipe face no estuvo disponible: {exc}"
 
     if not regions:
         return [], "MediaPipe no detectó rostro ni pose"
