@@ -18,3 +18,4 @@ pymeshlab
 onnxruntime-gpu
 pyvista
 vtk
+psutil

@@ -27,6 +27,7 @@ from studio_project import validate_settings, validate_glb, save_project, load_p
 from aethryx_engines import engine_catalog
 from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
 from aethryx_viewer import viewer_catalog
+from aethryx_adaptive import adaptive_plan_dict, build_adaptive_plan
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -267,6 +268,10 @@ class AethryxStudio(tk.Tk):
         tools_menu.add_command(
             label="Diagnostico local del proyecto...",
             command=self.show_project_diagnostics,
+        )
+        tools_menu.add_command(
+            label="AETHRYX Adaptive Engine...",
+            command=self.show_adaptive_engine,
         )
         for label in ("Reparacion - proximo", "Simetria - proximo", "Retopologia - proximo", "Rigging - proximo"):
             tools_menu.add_command(label=label, state="disabled")
@@ -1030,6 +1035,32 @@ class AethryxStudio(tk.Tk):
         messagebox.showinfo(
             "Diagnóstico local",
             "\n".join("- " + finding for finding in result["findings"]),
+        )
+
+    def show_adaptive_engine(self):
+        plan = build_adaptive_plan()
+        data = adaptive_plan_dict(plan)
+        hardware = data["hardware"]
+        profile = data["profile"]
+        vram = (
+            f"{hardware['vram_gib']:.2f} GiB"
+            if hardware["vram_gib"] is not None
+            else "no detectada"
+        )
+        messagebox.showinfo(
+            "AETHRYX Adaptive Engine",
+            f"RAM: {hardware['ram_gib']:.2f} GiB\n"
+            f"VRAM: {vram}\n"
+            f"CPU: {hardware['cpu_count']} núcleos\n"
+            f"GPU: {hardware['gpu_name'] or 'no detectada'}\n"
+            f"Almacenamiento libre: {hardware['storage_free_gib']:.2f} GiB\n"
+            f"Perfil objetivo: {profile['target_vram_gib']} GiB\n"
+            f"Precisión: {profile['dtype']}\n"
+            f"CPU Offloading: {'sí' if profile['cpu_offload'] else 'no'}\n"
+            f"Carga secuencial: {'sí' if profile['sequential_loading'] else 'no'}\n"
+            f"Generación: {'sí' if profile['generation_enabled'] else 'no'}\n"
+            f"Cuantización: {profile['quantization']}\n"
+            f"{data['reason']}",
         )
 
     def open_output_folder(self):

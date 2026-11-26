@@ -16,6 +16,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from triposg.pipelines.pipeline_triposg import TripoSGPipeline
 from image_process import prepare_image
 from briarmbg import BriaRMBG
+from aethryx_adaptive import (
+    build_adaptive_plan,
+    clear_cuda_memory,
+    unload_models,
+)
 
 import pymeshlab
 
@@ -79,10 +84,25 @@ if __name__ == "__main__":
         action="store_true",
         help="No cargar RMBG; usar canal alfa o máscara PNG proporcionada.",
     )
+    parser.add_argument(
+        "--adaptive-profile",
+        action="store_true",
+        help="Aplicar el perfil AETHRYX Adaptive Engine según hardware detectado.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = args.device
-    dtype = torch.float16 if device.startswith("cuda") else torch.float32
+    adaptive = build_adaptive_plan() if args.adaptive_profile else None
+    dtype = (
+        torch.float16
+        if device.startswith("cuda") and (adaptive is None or adaptive.profile.dtype == "fp16")
+        else torch.float32
+    )
+    if adaptive and adaptive.profile.basic_edit_mode:
+        raise RuntimeError(
+            "AETHRYX Adaptive Engine: modo edición básica activa; "
+            "la generación se deshabilita por RAM inferior a 8 GiB."
+        )
 
     # download pretrained weights
     triposg_weights_dir = "pretrained_weights/TripoSG"
@@ -96,15 +116,50 @@ if __name__ == "__main__":
 
     # init tripoSG pipeline
     pipe: TripoSGPipeline = TripoSGPipeline.from_pretrained(triposg_weights_dir).to(device, dtype)
+    if adaptive and adaptive.profile.sequential_loading:
+        pipe.enable_sequential_cpu_offload()
+    elif adaptive and adaptive.profile.cpu_offload and hasattr(pipe, "enable_model_cpu_offload"):
+        pipe.enable_model_cpu_offload()
 
     # run inference
-    run_triposg(
-        pipe,
-        image_input=args.image_input,
-        rmbg_net=rmbg_net,
-        seed=args.seed,
-        num_inference_steps=args.num_inference_steps,
-        guidance_scale=args.guidance_scale,
-        faces=args.faces,
-    ).export(args.output_path)
+    try:
+        result = run_triposg(
+            pipe,
+            image_input=args.image_input,
+            rmbg_net=rmbg_net,
+            seed=args.seed,
+            num_inference_steps=args.num_inference_steps,
+            guidance_scale=args.guidance_scale,
+            faces=args.faces,
+        )
+    except torch.cuda.OutOfMemoryError:
+        clear_cuda_memory()
+        if adaptive is None:
+            raise
+        if hasattr(pipe, "enable_sequential_cpu_offload"):
+            pipe.enable_sequential_cpu_offload()
+        try:
+            result = run_triposg(
+                pipe,
+                image_input=args.image_input,
+                rmbg_net=rmbg_net,
+                seed=args.seed,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                faces=args.faces,
+            )
+        except torch.cuda.OutOfMemoryError as exc:
+            unload_models(pipe, rmbg_net)
+            raise RuntimeError(
+                "AETHRYX Adaptive Engine: OOM persistente. "
+                "No se alteró la calidad solicitada; pruebe menos procesos concurrentes."
+            ) from exc
+
+    result.export(args.output_path)
+    if torch.cuda.is_available():
+        peak_mib = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        print(f"AETHRYX Adaptive peak VRAM: {peak_mib:.1f} MiB")
+        torch.cuda.reset_peak_memory_stats()
+    if adaptive:
+        print("AETHRYX Adaptive profile:", adaptive.profile)
     print(f"Mesh saved to {args.output_path}")

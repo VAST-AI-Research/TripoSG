@@ -79,6 +79,9 @@ See `AETHRYX_VISION_PHASE4.md` and `test_assets/anime/` for the real local anime
 test, PyVista preview, TripoSG GLB metrics, license review, defects, and exact
 VRAM measurements. Weights remain excluded from Git.
 
+See `AETHRYX_ADAPTIVE_ENGINE.md` for hardware profiles, FP16/INT8/INT4 status,
+CPU offloading, CUDA OOM recovery, basic edit mode and benchmark requirements.
+
 Projects use a versioned `.aeth` JSON manifest containing generation settings and external image/model paths; source assets are not copied into the project. The manifest does not yet store mesh edits, materials, skeletons or animations. Keep referenced files available when moving a project.
 
 The scene list supports object selection, visibility toggling, and isolating selected objects. The View menu provides front, side, rear, and top cameras, orthographic/perspective projection, grid, solid/wireframe display, and frame-all. Mesh statistics are computed from the source scene. Preview decimation works on copies and is capped at 8,000 faces per object for responsive rendering; node transforms and the original source scene are preserved. **Exportar escena original como GLB** writes the original GLB bytes unchanged, or exports the source scene for other formats. The startup GPU check uses `nvidia-smi`; PyTorch is loaded only when opening its detailed diagnostics or generating a model.
