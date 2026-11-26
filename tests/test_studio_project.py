@@ -19,6 +19,28 @@ class ProjectTests(unittest.TestCase):
             image.unlink()
             with self.assertRaises(ValueError):
                 load_project(project)
+    def test_reference_regions_round_trip_and_legacy_default(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            image = root / "sheet.png"
+            image.touch()
+            project = root / "character.aeth"
+            region = {
+                "id": "ref-001",
+                "path": str(image),
+                "view": "front",
+                "bbox": [0.1, 0.2, 0.8, 0.9],
+                "primary": True,
+            }
+            save_project(project, image=image, model=None, output=root / "mesh.glb",
+                         steps=50, faces=-1, seed=42, guidance=7.0,
+                         references=[region])
+            data = json.loads(project.read_text(encoding="utf-8"))
+            self.assertEqual(data["references"][0]["path"], "sheet.png")
+            self.assertEqual(load_project(project)["references"][0]["bbox"], region["bbox"])
+            data.pop("references")
+            project.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(load_project(project)["references"], [])
     def test_invalid_settings(self):
         for values in [(0,-1,42,7), (50,0,42,7), (50,-1,-1,7), (50,-1,42,float("nan"))]:
             with self.assertRaises(ValueError):

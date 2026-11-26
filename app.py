@@ -16,6 +16,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+from character_sheet import REFERENCE_VIEW_LABELS, crop_reference, validate_reference_regions
+from character_sheet_dialog import CharacterSheetDialog
 from studio_project import validate_settings, validate_glb, save_project, load_project
 
 from studio_metadata import (
@@ -59,6 +61,7 @@ class AethryxStudio(tk.Tk):
         self.seed = tk.IntVar(value=42)
         self.guidance = tk.DoubleVar(value=7.0)
         self.project_path = None
+        self.reference_regions = []
         self.generation_active = False
         self.model_loading = False
         self.projection = tk.StringVar(value="persp")
@@ -230,6 +233,7 @@ class AethryxStudio(tk.Tk):
 
         image_menu = tk.Menu(self.main_menu, **menu_colors)
         image_menu.add_command(label="Cargar referencia...", command=self.choose_image)
+        image_menu.add_command(label="Analizar hoja de personaje...", command=self.analyze_character_sheet)
         image_menu.add_command(label="Generar malla 3D", command=self.generate)
         for label in ("Recortar - proximo", "Quitar fondo - proximo", "Resolucion de salida - proximo"):
             image_menu.add_command(label=label, state="disabled")
@@ -295,6 +299,7 @@ class AethryxStudio(tk.Tk):
         quickbar = ttk.Frame(self, padding=(14, 4))
         quickbar.pack(fill="x")
         ttk.Button(quickbar, text="Importar imagen", command=self.choose_image).pack(side="left", padx=(0, 6))
+        ttk.Button(quickbar, text="Analizar hoja", command=self.analyze_character_sheet).pack(side="left", padx=6)
         ttk.Button(quickbar, text="Abrir malla", command=self.choose_model).pack(side="left", padx=6)
         ttk.Button(quickbar, text="Exportar GLB", command=self.export_model).pack(side="left", padx=6)
         ttk.Button(quickbar, text="Carpeta de salida", command=self.open_output_folder).pack(side="left", padx=6)
@@ -470,6 +475,7 @@ class AethryxStudio(tk.Tk):
             return
         self._clear_scene()
         self.project_path = None
+        self.reference_regions = []
         self.image_path.set("")
         self.output_path.set("")
         self.steps.set(50); self.faces.set(-1); self.seed.set(42); self.guidance.set(7.0)
@@ -491,6 +497,7 @@ class AethryxStudio(tk.Tk):
                 return
             self._clear_scene()
             self.project_path = path
+            self.reference_regions = data["references"]
             self.image_path.set(data["image"]); self.output_path.set(data["output"])
             for key in ("steps", "faces", "seed", "guidance"):
                 getattr(self, key).set(data["settings"][key])
@@ -514,7 +521,8 @@ class AethryxStudio(tk.Tk):
         try:
             save_project(path, image=self.image_path.get(), model=self.current_model_path,
                          output=self.output_path.get(), steps=self.steps.get(), faces=self.faces.get(),
-                         seed=self.seed.get(), guidance=self.guidance.get())
+                         seed=self.seed.get(), guidance=self.guidance.get(),
+                         references=self.reference_regions)
             self.project_path = path
             self.title(f"{PRODUCT_NAME} — {os.path.basename(path)}")
             self.status.set("Proyecto guardado. Los recursos se conservan como archivos externos.")
@@ -541,6 +549,55 @@ class AethryxStudio(tk.Tk):
             self.image_path.set(path)
             self._load_reference_preview()
             self.status.set(f"Imagen cargada: {os.path.basename(path)}")
+
+    def analyze_character_sheet(self):
+        if not self._workspace_available():
+            return
+        current_image = self.image_path.get().strip()
+        options = {
+            "title": "Seleccionar hoja de personaje",
+            "filetypes": [("Imágenes", "*.png *.jpg *.jpeg *.webp *.bmp")],
+        }
+        if current_image and os.path.isfile(current_image):
+            options["initialdir"] = os.path.dirname(current_image)
+            options["initialfile"] = os.path.basename(current_image)
+        path = filedialog.askopenfilename(**options)
+        if not path:
+            return
+
+        existing = [
+            region
+            for region in self.reference_regions
+            if os.path.normcase(os.path.realpath(region["path"])) == os.path.normcase(os.path.realpath(path))
+        ]
+        dialog = CharacterSheetDialog(self, path, existing)
+        self.wait_window(dialog)
+        if dialog.result is None:
+            return
+        other_sources = [
+            dict(region)
+            for region in self.reference_regions
+            if os.path.normcase(os.path.realpath(region["path"])) != os.path.normcase(os.path.realpath(path))
+        ]
+        if any(region["primary"] for region in dialog.result):
+            for region in other_sources:
+                region["primary"] = False
+        try:
+            self.reference_regions = validate_reference_regions(other_sources + dialog.result)
+        except ValueError as exc:
+            messagebox.showerror("Referencias no válidas", str(exc))
+            return
+        self.image_path.set(path)
+        self._load_reference_preview()
+        self.status.set(f"Hoja analizada: {len(dialog.result)} región(es) etiquetada(s) manualmente.")
+        self.append_log(
+            "Character Sheet Analyzer: "
+            f"{len(dialog.result)} recorte(s); la reconstrucción multivista aún no está disponible."
+        )
+
+    @staticmethod
+    def _same_path(first, second):
+        return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
 
     def choose_output(self):
         path = filedialog.asksaveasfilename(
@@ -1078,6 +1135,45 @@ class AethryxStudio(tk.Tk):
         except (ValueError, OSError, tk.TclError) as exc:
             messagebox.showerror("Configuración no válida", str(exc))
             return
+
+        matching_regions = [
+            region for region in self.reference_regions if self._same_path(region["path"], image)
+        ]
+        primary_region = next((region for region in matching_regions if region["primary"]), None)
+        if matching_regions and primary_region is None:
+            if not messagebox.askyesno(
+                "Vista principal no definida",
+                "TripoSG utiliza una sola imagen y no combina vistas. "
+                "No hay un recorte principal aprobado. ¿Continuar usando la hoja completa?",
+            ):
+                return
+
+        temporary_image = None
+        input_description = image
+        if primary_region:
+            try:
+                crop = crop_reference(primary_region["path"], primary_region["bbox"])
+                handle, temporary_image = tempfile.mkstemp(
+                    prefix=".aethryx-reference-",
+                    suffix=".png",
+                    dir=os.path.dirname(output),
+                )
+                os.close(handle)
+                crop.save(temporary_image, format="PNG")
+                input_description = (
+                    f"{REFERENCE_VIEW_LABELS[primary_region['view']]} "
+                    f"de {os.path.basename(primary_region['path'])}"
+                )
+            except (OSError, ValueError) as exc:
+                if temporary_image and os.path.exists(temporary_image):
+                    try:
+                        os.remove(temporary_image)
+                    except OSError as cleanup_error:
+                        self.append_log(f"No se pudo eliminar el recorte temporal: {cleanup_error}")
+                messagebox.showerror("No se pudo preparar el recorte", str(exc))
+                return
+            image = temporary_image
+
         self.generation_active = True
         self.cancel_event = threading.Event()
         self.progress.configure(mode="indeterminate")
@@ -1085,11 +1181,11 @@ class AethryxStudio(tk.Tk):
         self.generate_button.state(["disabled"])
         self.cancel_button.state(["!disabled"])
         self.status.set("Preparando generacion...")
-        self.append_log(f"Entrada: {image}")
+        self.append_log(f"Entrada: {input_description}")
         self.append_log(f"Salida: {output}")
         thread = threading.Thread(
             target=self._run_generation,
-            args=(image, output, steps, faces, seed, guidance, self.cancel_event),
+            args=(image, output, steps, faces, seed, guidance, self.cancel_event, temporary_image),
             daemon=True,
         )
         thread.start()
@@ -1106,10 +1202,15 @@ class AethryxStudio(tk.Tk):
                 self.append_log(f"No se pudo cancelar el proceso: {exc}")
         self.status.set("Cancelando generacion...")
 
-    def _run_generation(self, image, output, steps, faces, seed, guidance, cancel_event):
+    def _run_generation(
+        self, image, output, steps, faces, seed, guidance, cancel_event, temporary_image=None
+    ):
         directory = os.path.dirname(output)
         temp_path = None
         process = None
+        completion = None
+        completion_args = ()
+        cleanup_errors = []
         try:
             handle, temp_path = tempfile.mkstemp(
                 prefix=f".{os.path.basename(output)}.",
@@ -1134,7 +1235,7 @@ class AethryxStudio(tk.Tk):
                 "--guidance-scale", str(guidance),
             ]
             if cancel_event.is_set():
-                self.after(0, self._generation_cancelled)
+                completion = self._generation_cancelled
                 return
 
             environment = os.environ.copy()
@@ -1165,30 +1266,42 @@ class AethryxStudio(tk.Tk):
 
             process.wait()
             if cancel_event.is_set():
-                self.after(0, self._generation_cancelled)
+                completion = self._generation_cancelled
             elif process.returncode == 0 and temp_path and os.path.isfile(temp_path):
                 validate_glb(temp_path)
                 candidate = trimesh.load(temp_path, force="scene")
                 if not any(isinstance(mesh, trimesh.Trimesh) and len(mesh.faces) and np.isfinite(mesh.vertices).all() for mesh in candidate.geometry.values()):
                     raise ValueError("La salida no contiene una malla válida.")
                 if cancel_event.is_set():
-                    self.after(0, self._generation_cancelled)
-                    return
-                os.replace(temp_path, output)
-                temp_path = None
-                self.after(0, lambda: self._generation_finished(output))
+                    completion = self._generation_cancelled
+                else:
+                    os.replace(temp_path, output)
+                    temp_path = None
+                    completion = self._generation_finished
+                    completion_args = (output,)
             else:
                 error = "".join(recent_output) or "El proceso termino sin producir un modelo."
-                self.after(0, lambda message=error: self._generation_failed(message))
+                completion = self._generation_failed
+                completion_args = (error,)
         except Exception as exc:
-            self.after(0, lambda error=str(exc): self._generation_failed(error))
+            completion = self._generation_failed
+            completion_args = (str(exc),)
         finally:
             self.generation_process = None
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+            for temporary_path in (temp_path, temporary_image):
+                if temporary_path and os.path.exists(temporary_path):
+                    try:
+                        os.remove(temporary_path)
+                    except OSError as exc:
+                        cleanup_errors.append(f"No se pudo eliminar el archivo temporal {temporary_path}: {exc}")
+
+            if completion is not None:
+                def deliver_result(callback=completion, args=completion_args, errors=tuple(cleanup_errors)):
+                    for error in errors:
+                        self.append_log(error)
+                    callback(*args)
+
+                self.after(0, deliver_result)
 
     def _generation_finished(self, output):
         self.generation_active = False

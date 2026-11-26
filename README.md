@@ -65,11 +65,15 @@ Install PyTorch for the CUDA version supported by your NVIDIA driver (CUDA 12.8 
 
 The visible product name is **AETHRYX Studio** (provisional); **NIKIX** is the working brand. The tagline and product metadata are centralized in `studio_metadata.py`. TripoSG remains the generation engine. No legal entity, trademark registration, or product version is claimed.
 
-Start the Windows app with `.\iniciar-aethryx-studio.bat` (the previous `iniciar-triposg.bat` remains as an alias). Select a reference image and output path, set inference steps and a face limit, then choose **Generar modelo 3D**. The app reports the actual output from the model process, supports cancellation, and opens a successful GLB in the viewer. Use mouse drag to rotate, the wheel to zoom, and the Matplotlib toolbar to pan or reset the camera. Import GLB, GLTF, OBJ, STL, or PLY files with **Abrir malla**.
+Start the Windows app with `.\iniciar-aethryx-studio.bat` (the previous `iniciar-triposg.bat` remains as an alias). Select a reference image and output path, set inference steps, face limit, seed and guidance, then choose **Generar modelo 3D**. The app reports the actual output from the model process, supports cancellation, and opens a successful GLB in the viewer. Use mouse drag to rotate, the wheel to zoom, and the Matplotlib toolbar to pan or reset the camera. Import GLB, GLTF, OBJ, STL, or PLY files with **Abrir malla**.
 
-The scene list supports object selection, visibility toggling, and isolating selected objects. The View menu provides front, side, rear, and top cameras, orthographic/perspective projection, grid, solid/wireframe display, and frame-all. Mesh statistics are computed from the source scene. Preview decimation works on copies and is capped at 8,000 faces per object for responsive rendering; node transforms and the original source scene are preserved. **Exportar escena original como GLB** writes the unmodified source scene. The startup GPU check uses `nvidia-smi`; PyTorch is loaded only when opening its detailed diagnostics or generating a model.
+Use **Imagen > Analizar hoja de personaje** to draw reference regions, label their view or detail type, and optionally designate one full-body view as the primary input. This first analyzer is deliberately manual: it does not detect or classify views automatically. Regions and normalized crop coordinates are stored in `.aeth` projects; the current TripoSG engine receives only the approved primary crop and does not fuse multiple views. Without a primary crop, the app asks before sending the whole sheet as a single image.
 
-Menus expose the current features. Project save/load, undo/redo, vertex/edge/face editing, material/UV tools, mesh repair/retopology, rigging, and animation are explicitly marked as upcoming and are not implemented.
+Projects use a versioned `.aeth` JSON manifest containing generation settings and external image/model paths; source assets are not copied into the project. The manifest does not yet store mesh edits, materials, skeletons or animations. Keep referenced files available when moving a project.
+
+The scene list supports object selection, visibility toggling, and isolating selected objects. The View menu provides front, side, rear, and top cameras, orthographic/perspective projection, grid, solid/wireframe display, and frame-all. Mesh statistics are computed from the source scene. Preview decimation works on copies and is capped at 8,000 faces per object for responsive rendering; node transforms and the original source scene are preserved. **Exportar escena original como GLB** writes the original GLB bytes unchanged, or exports the source scene for other formats. The startup GPU check uses `nvidia-smi`; PyTorch is loaded only when opening its detailed diagnostics or generating a model.
+
+Menus expose the current features. Automatic reference recognition, multi-view reconstruction, perspective synthesis, undo/redo, vertex/edge/face editing, material/UV tools, mesh repair/retopology, rigging, and animation are explicitly marked as upcoming and are not implemented.
 
 An optional Windows launcher can be built with `pip install pyinstaller` followed by `pyinstaller --noconsole --name AETHRYXStudio AETHRYXStudio.py`. It is not a standalone distribution: it still expects the repository, `.venv`, and downloaded model weights. The batch launcher is the simplest way to start the local app.
 
@@ -106,10 +110,13 @@ This is an experimental local front end and does not require Blender. Generated 
 On Windows 10 with Python 3.10.11 and an NVIDIA RTX 5070 (CUDA 12.8):
 
 - `python -m pip check` — passed with no broken requirements.
-- `python -m py_compile app.py studio_metadata.py AETHRYXStudio.py` — passed.
+- `python -m unittest discover -s tests` — 9 project-manifest, GLB-validation, and reference-crop tests passed.
+- `python -m py_compile app.py character_sheet.py character_sheet_dialog.py studio_project.py studio_metadata.py AETHRYXStudio.py` — passed.
 - Generated and opened a GLB from the repository's sample image on the GPU; the face-limited test mesh loaded as 2,506 vertices and 5,000 faces.
 - Loaded that GLB into the desktop 3D viewer and confirmed it rendered.
 - Loaded the existing 1,384,278-face `output.glb` in the viewer; it displayed as an 8,000-face preview while retaining source statistics and scene data.
+- Manually selected, labeled, and designated a primary crop from a synthetic character sheet; verified that the generation worker receives the crop instead of the full sheet.
+- Saved and reopened `.aeth` project settings and reference metadata; confirmed that copying an imported GLB preserves its bytes.
 - Tested a translated GLB scene: viewer transforms were respected, source geometry stayed unchanged, and selection, visibility, camera, wireframe, and solid controls worked.
 - Confirmed the Python GUI worker's output can be captured without opening a console window; built and launched the no-console executable launcher.
 

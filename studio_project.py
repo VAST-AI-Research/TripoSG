@@ -5,6 +5,9 @@ from pathlib import Path
 import struct
 import tempfile
 
+from character_sheet import validate_reference_regions
+
+
 def validate_settings(steps, faces, seed, guidance):
     if type(steps) is not int or not 1 <= steps <= 100:
         raise ValueError("Pasos: 1–100.")
@@ -53,14 +56,17 @@ def _relative(value, parent):
     except ValueError:  # Windows volumes differ
         return str(path)
 
-def save_project(path, *, image, model, output, steps, faces, seed, guidance):
+def save_project(path, *, image, model, output, steps, faces, seed, guidance, references=()):
     validate_settings(steps, faces, seed, guidance)
     path = Path(path).resolve()
     if path.suffix.lower() != ".aeth":
         raise ValueError("El proyecto debe tener extensión .aeth.")
+    reference_regions = validate_reference_regions(references)
+    for region in reference_regions:
+        region["path"] = _relative(region["path"], path.parent)
     data = {"format": "AETHRYX", "version": 1,
             "image": _relative(image, path.parent), "model": _relative(model, path.parent),
-            "output": _relative(output, path.parent),
+            "output": _relative(output, path.parent), "references": reference_regions,
             "settings": {"steps": steps, "faces": faces, "seed": seed, "guidance": guidance}}
     temp = None
     try:
@@ -94,4 +100,18 @@ def load_project(path):
             raise ValueError("Recurso no encontrado: " + result[key])
     if result["output"] and Path(result["output"]).suffix.lower() != ".glb":
         raise ValueError("La salida del proyecto debe ser GLB.")
+    raw_references = data.get("references", [])
+    if not isinstance(raw_references, list):
+        raise ValueError("La lista de regiones de referencia no es válida.")
+    resolved_references = []
+    for region in raw_references:
+        if not isinstance(region, dict) or not isinstance(region.get("path"), str):
+            raise ValueError("Ruta de región de referencia inválida.")
+        resolved_references.append(
+            {
+                **region,
+                "path": str((path.parent / region["path"]).resolve()),
+            }
+        )
+    result["references"] = validate_reference_regions(resolved_references)
     return result
