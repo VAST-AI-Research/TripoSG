@@ -71,3 +71,5 @@ tiempo, calidad visual, VRAM pico, VRAM final, caras, vértices, fallos y OOM.
 - 4, 6, 8, 16 y 24 GiB quedan suspendidos por decisión del director.
 - El hardware de referencia activo es exclusivamente RTX 5070 de 12 GiB
   hasta completar el avatar humanoide VRChat.
+- TripoSG no expone `model_cpu_offload_seq`; el CPU offload y la carga secuencial
+  no se aplican al pipeline personalizado hasta que el motor declare soporte.

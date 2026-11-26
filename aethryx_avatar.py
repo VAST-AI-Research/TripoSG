@@ -74,3 +74,42 @@ def build_avatar_scene_graph(references=None, mesh_stats=None):
             node.confidence,
         ))
     return [asdict(node) for node in updated]
+
+
+def split_disconnected_components(model_path):
+    from pathlib import Path
+    import trimesh
+
+    path = Path(model_path)
+    if not path.is_file():
+        return {"status": "unavailable", "reason": "Malla no encontrada"}
+    try:
+        scene = trimesh.load(str(path), force="scene", process=False)
+    except Exception as exc:
+        return {"status": "unavailable", "reason": f"No se pudo cargar la malla: {exc}"}
+
+    components = []
+    for geometry_name, geometry in scene.geometry.items():
+        try:
+            pieces = geometry.split(only_watertight=False)
+        except Exception:
+            pieces = [geometry]
+        for index, piece in enumerate(pieces):
+            bounds = piece.bounds
+            components.append({
+                "id": f"{geometry_name}-component-{index}",
+                "name": f"Componente geométrico {index + 1}",
+                "vertices": int(len(piece.vertices)),
+                "faces": int(len(piece.faces)),
+                "bounds": [
+                    [float(value) for value in bounds[0]],
+                    [float(value) for value in bounds[1]],
+                ],
+                "classification": "unassigned",
+                "editable": True,
+            })
+    return {
+        "status": "available",
+        "components": components,
+        "note": "Separación topológica real; anatomía no inferida.",
+    }

@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import trimesh
-from aethryx_avatar import build_avatar_scene_graph
+from aethryx_avatar import build_avatar_scene_graph, split_disconnected_components
 
 
 @dataclass(frozen=True)
@@ -137,6 +137,13 @@ def analyze_project_diagnostics(context):
 
 
 TOOL_REGISTRY = {
+    "split_disconnected_components": ToolDefinition(
+        "split_disconnected_components",
+        "Separa componentes geométricos desconectados sin asignar anatomía.",
+        {"model_path": "string"},
+        ("read",),
+        True,
+    ),
     "get_avatar_scene_graph": ToolDefinition(
         "get_avatar_scene_graph",
         "Devuelve el scene graph humanoide y el estado real de sus componentes.",
@@ -230,6 +237,8 @@ def execute_tool(name, inputs, project_context=None, write_allowed=False):
         return list_scene_nodes(inputs.get("model_path", ""))
     if name == "get_mesh_statistics":
         return get_mesh_statistics(inputs.get("model_path", ""))
+    if name == "split_disconnected_components":
+        return split_disconnected_components(inputs.get("model_path", ""))
     if name == "validate_avatar":
         return validate_avatar_placeholder()
     return {"status": "unavailable", "reason": "Sin ejecutor implementado"}

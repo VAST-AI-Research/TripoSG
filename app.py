@@ -24,7 +24,7 @@ from character_sheet import (
 )
 from character_sheet_dialog import CharacterSheetDialog
 from studio_project import validate_settings, validate_glb, save_project, load_project
-from aethryx_engines import engine_catalog
+from aethryx_engines import engine_catalog, prepare_character_alpha
 from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
 from aethryx_viewer import viewer_catalog
 from aethryx_adaptive import adaptive_plan_dict, build_adaptive_plan
@@ -207,6 +207,7 @@ class AethryxStudio(tk.Tk):
         ):
             view_menu.add_command(label=label, command=lambda name=camera: self.set_camera(name))
         view_menu.add_command(label="Encuadrar todo", command=self.frame_model)
+        view_menu.add_command(label="Abrir visor PyVista/VTK...", command=self.open_pyvista_viewer)
         view_menu.add_separator()
         view_menu.add_radiobutton(
             label="Perspectiva",
@@ -1087,6 +1088,31 @@ class AethryxStudio(tk.Tk):
             f"{data['reason']}",
         )
 
+    def open_pyvista_viewer(self):
+        path = self.current_model_path
+        if not path or not os.path.isfile(path):
+            messagebox.showinfo("Visor PyVista/VTK", "Importa o genera una malla primero.")
+            return
+
+        def open_viewer():
+            try:
+                import pyvista as pv
+                import trimesh
+                scene = trimesh.load(path, force="scene", process=False)
+                plotter = pv.Plotter(title="AETHRYX PyVista/VTK")
+                plotter.set_background("#11141b")
+                for geometry in scene.geometry.values():
+                    plotter.add_mesh(pv.wrap(geometry), smooth_shading=True)
+                plotter.add_axes()
+                plotter.show(auto_close=False)
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror(
+                    "Visor PyVista/VTK",
+                    str(exc),
+                ))
+
+        threading.Thread(target=open_viewer, daemon=True).start()
+
     def open_output_folder(self):
         path = os.path.dirname(os.path.abspath(self.output_path.get()))
         if os.path.isdir(path):
@@ -1305,6 +1331,27 @@ class AethryxStudio(tk.Tk):
                 messagebox.showerror("No se pudo preparar el recorte", str(exc))
                 return
             image = temporary_image
+        alpha_path = os.path.join(
+            os.path.dirname(output),
+            f".aethryx-alpha-{os.path.splitext(os.path.basename(output))[0]}.png",
+        )
+        alpha_result = prepare_character_alpha(image, alpha_path)
+        if alpha_result["status"] == "available":
+            if temporary_image and os.path.exists(temporary_image):
+                try:
+                    os.remove(temporary_image)
+                except OSError:
+                    pass
+            temporary_image = alpha_path
+            image = alpha_path
+            self.append_log(
+                "ISNet: eliminacion de fondo local aplicada; "
+                f"{alpha_result['provider']}."
+            )
+        else:
+            self.append_log(
+                "ISNet: fondo no preparado; " + alpha_result["reason"]
+            )
 
         self.generation_active = True
         self.cancel_event = threading.Event()
@@ -1365,6 +1412,8 @@ class AethryxStudio(tk.Tk):
                 str(faces),
                 "--seed", str(seed),
                 "--guidance-scale", str(guidance),
+                "--adaptive-profile",
+                "--skip-background-removal",
             ]
             if cancel_event.is_set():
                 completion = self._generation_cancelled

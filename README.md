@@ -83,6 +83,10 @@ See `AETHRYX_ANATOMY_PHASE5.md` for the persistent humanoid scene graph,
 provisional pose-derived face/eye/hair/clothing regions, and honest rigging
 component status.
 
+See `AETHRYX_GENESIS_PHASE2.md` for the 50/75-step RTX 5070 TripoSG comparison,
+ISNet integration, PyVista evidence, original/25k/100k mesh copies, and
+anatomical defects observed.
+
 See `AETHRYX_ADAPTIVE_ENGINE.md` for hardware profiles, FP16/INT8/INT4 status,
 CPU offloading, CUDA OOM recovery, basic edit mode and benchmark requirements.
 

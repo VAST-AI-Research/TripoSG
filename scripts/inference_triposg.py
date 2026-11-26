@@ -116,9 +116,19 @@ if __name__ == "__main__":
 
     # init tripoSG pipeline
     pipe: TripoSGPipeline = TripoSGPipeline.from_pretrained(triposg_weights_dir).to(device, dtype)
-    if adaptive and adaptive.profile.sequential_loading:
+    if (
+        adaptive
+        and adaptive.profile.sequential_loading
+        and hasattr(pipe, "enable_sequential_cpu_offload")
+        and getattr(pipe, "model_cpu_offload_seq", None)
+    ):
         pipe.enable_sequential_cpu_offload()
-    elif adaptive and adaptive.profile.cpu_offload and hasattr(pipe, "enable_model_cpu_offload"):
+    elif (
+        adaptive
+        and adaptive.profile.cpu_offload
+        and hasattr(pipe, "enable_model_cpu_offload")
+        and getattr(pipe, "model_cpu_offload_seq", None)
+    ):
         pipe.enable_model_cpu_offload()
 
     # run inference
@@ -136,7 +146,10 @@ if __name__ == "__main__":
         clear_cuda_memory()
         if adaptive is None:
             raise
-        if hasattr(pipe, "enable_sequential_cpu_offload"):
+        if (
+            hasattr(pipe, "enable_sequential_cpu_offload")
+            and getattr(pipe, "model_cpu_offload_seq", None)
+        ):
             pipe.enable_sequential_cpu_offload()
         try:
             result = run_triposg(

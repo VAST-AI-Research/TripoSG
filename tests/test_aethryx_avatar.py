@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 from PIL import Image
 
-from aethryx_avatar import build_avatar_scene_graph
+import numpy as np
+import trimesh
+
+from aethryx_avatar import build_avatar_scene_graph, split_disconnected_components
 from studio_project import save_project, load_project
 
 
@@ -31,6 +34,22 @@ class AvatarSceneGraphTests(unittest.TestCase):
         armature = next(node for node in nodes if node["id"] == "armature")
         self.assertEqual(body["status"], "detected-needs-confirmation")
         self.assertEqual(armature["status"], "unavailable")
+
+    def test_disconnected_geometry_components_are_split_without_anatomy_claims(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "components.glb"
+            scene = trimesh.Scene([
+                trimesh.creation.box(extents=(1, 1, 1)),
+                trimesh.creation.box(extents=(0.5, 0.5, 0.5)),
+            ])
+            scene.export(str(path), file_type="glb")
+            result = split_disconnected_components(path)
+            self.assertEqual(result["status"], "available")
+            self.assertGreaterEqual(len(result["components"]), 2)
+            self.assertTrue(all(
+                component["classification"] == "unassigned"
+                for component in result["components"]
+            ))
 
     def test_avatar_scene_graph_round_trip_in_project_version_2(self):
         with tempfile.TemporaryDirectory() as folder:

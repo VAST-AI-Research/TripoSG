@@ -502,3 +502,46 @@ def missing_reference_views(regions):
 
 def engine_catalog_dict():
     return [asdict(engine) for engine in engine_catalog()]
+
+
+def prepare_character_alpha(source, output_path):
+    source = Path(source).expanduser().resolve()
+    output_path = Path(output_path).expanduser().resolve()
+    if not source.is_file():
+        return {"status": "unavailable", "reason": "Imagen de referencia no encontrada"}
+    model_path = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_MODEL", "")
+    labels_text = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_LABELS", "")
+    if not model_path or not labels_text:
+        model_path = str(Path(__file__).parent / "models" / "anime" / "isnetis.onnx")
+        labels_text = "background,character"
+    os.environ["AETHRYX_SEMANTIC_SEGMENTATION_MODEL"] = model_path
+    os.environ["AETHRYX_SEMANTIC_SEGMENTATION_LABELS"] = labels_text
+    with Image.open(source) as pil_image:
+        rgb = pil_image.convert("RGB")
+        width, height = rgb.size
+    regions, reason = _onnx_segmentation_regions(source, width, height)
+    character = next(
+        (region for region in regions if region.get("view") == "other"),
+        None,
+    )
+    if character is None:
+        return {"status": "unavailable", "reason": reason}
+    mask = character["mask"]
+    import numpy as np
+    alpha = np.zeros((height, width), dtype=np.uint8)
+    runs = mask["runs"]
+    position = 0
+    for index in range(0, len(runs), 2):
+        value = runs[index]
+        count = runs[index + 1]
+        alpha.flat[position:position + count] = 255 if value else 0
+        position += count
+    rgba = np.dstack((np.asarray(rgb), alpha))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(rgba, "RGBA").save(output_path, format="PNG")
+    return {
+        "status": "available",
+        "path": str(output_path),
+        "provider": "onnx-segmentation",
+        "model": model_path,
+    }

@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from aethryx_adaptive import (
     HardwareSnapshot,
@@ -14,12 +15,12 @@ class AdaptiveEngineTests(unittest.TestCase):
             [4, 6, 8, 12, 16, 24],
         )
 
-    def test_12_gib_profile_uses_fp16_and_cpu_offload(self):
+    def test_12_gib_triposg_profile_uses_fp16_without_offload(self):
         hardware = HardwareSnapshot(32, 12.2, 20, "RTX 5070", 500)
         plan = build_adaptive_plan(hardware)
         self.assertEqual(plan.profile.target_vram_gib, 12)
         self.assertEqual(plan.profile.dtype, "fp16")
-        self.assertTrue(plan.profile.cpu_offload)
+        self.assertFalse(plan.profile.cpu_offload)
         self.assertTrue(plan.profile.quality_priority)
 
     def test_low_ram_enables_basic_edit_mode(self):
@@ -38,6 +39,17 @@ class AdaptiveEngineTests(unittest.TestCase):
         plan = build_adaptive_plan(hardware)
         self.assertEqual(plan.profile.target_vram_gib, 4)
         self.assertEqual(plan.profile.dtype, "fp32")
+
+    def test_generation_script_contains_real_adaptive_and_isnet_flags(self):
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "inference_triposg.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--adaptive-profile", script)
+        self.assertIn("--skip-background-removal", script)
+        self.assertIn("enable_model_cpu_offload", script)
+        self.assertIn("OutOfMemoryError", script)
 
 
 if __name__ == "__main__":
