@@ -200,6 +200,7 @@ credentials/
 user_images/
 personal_images/
 private_images/
+assets/doc/aethryx-studio-ui.png
 /*.png
 /*.jpg
 /*.jpeg

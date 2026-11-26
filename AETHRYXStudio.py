@@ -18,7 +18,7 @@ APP = os.path.join(ROOT, "app.py")
 
 
 if not os.path.isfile(PYTHON):
-    sys.exit("No se encontro el entorno Python de TripoSG.")
+    sys.exit("No se encontro el entorno Python de AETHRYX Studio.")
 
 subprocess.Popen(
     [PYTHON, APP],

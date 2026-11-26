@@ -61,11 +61,17 @@ Install PyTorch for the CUDA version supported by your NVIDIA driver (CUDA 12.8 
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### Nikix 3D Studio desktop app (experimental)
+### AETHRYX Studio desktop app (provisional identity)
 
-Start the app with `.\iniciar-triposg.bat`. Select an image and output path, set the inference steps and face limit, then choose **Generate 3D model**. The app shows generation output and progress, and opens the resulting mesh in its interactive viewer. Use the mouse to rotate and zoom, the Matplotlib toolbar to pan/reset the view, or **Open 3D model...** to inspect an existing GLB, GLTF, OBJ, STL, or PLY file.
+The visible product name is **AETHRYX Studio** (provisional); **NIKIX** is the working brand. The tagline and product metadata are centralized in `studio_metadata.py`. TripoSG remains the generation engine. No legal entity, trademark registration, or product version is claimed.
 
-The generated `TripoSG.exe` launcher is optional and is not a standalone distribution: it expects the repository, `.venv`, and downloaded model weights to remain available. The batch launcher is the simplest way to start the local app.
+Start the Windows app with `.\iniciar-aethryx-studio.bat` (the previous `iniciar-triposg.bat` remains as an alias). Select a reference image and output path, set inference steps and a face limit, then choose **Generar modelo 3D**. The app reports the actual output from the model process, supports cancellation, and opens a successful GLB in the viewer. Use mouse drag to rotate, the wheel to zoom, and the Matplotlib toolbar to pan or reset the camera. Import GLB, GLTF, OBJ, STL, or PLY files with **Abrir malla**.
+
+The scene list supports object selection, visibility toggling, and isolating selected objects. The View menu provides front, side, rear, and top cameras, orthographic/perspective projection, grid, solid/wireframe display, and frame-all. Mesh statistics are computed from the source scene. Preview decimation works on copies and is capped at 8,000 faces per object for responsive rendering; node transforms and the original source scene are preserved. **Exportar escena original como GLB** writes the unmodified source scene. The startup GPU check uses `nvidia-smi`; PyTorch is loaded only when opening its detailed diagnostics or generating a model.
+
+Menus expose the current features. Project save/load, undo/redo, vertex/edge/face editing, material/UV tools, mesh repair/retopology, rigging, and animation are explicitly marked as upcoming and are not implemented.
+
+An optional Windows launcher can be built with `pip install pyinstaller` followed by `pyinstaller --noconsole --name AETHRYXStudio AETHRYXStudio.py`. It is not a standalone distribution: it still expects the repository, `.venv`, and downloaded model weights. The batch launcher is the simplest way to start the local app.
 
 The first generation downloads model weights from Hugging Face and therefore needs an internet connection. Weights are stored under `pretrained_weights/` and are intentionally excluded from Git.
 
@@ -91,23 +97,23 @@ The required model weights will be automatically downloaded:
 - TripoSG-scribble (scribble+prompt condition) model from [VAST-AI/TripoSG-scribble](https://huggingface.co/VAST-AI/TripoSG-scribble) → `pretrained_weights/TripoSG-scribble`
 - RMBG model from [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) → `pretrained_weights/RMBG-1.4`
 
-## Implementation status
+## Product scope and limitations
 
-The Windows desktop app currently supports image-to-mesh generation, progress and output logs, GLB export, and interactive geometry preview/loading for common mesh formats. Mesh previews are simplified when needed to keep the viewer responsive.
-
-This is an experimental local front end for TripoSG and does not require Blender, but it is not yet a complete avatar authoring tool. Generated meshes are not rigged, do not include Unity/VRChat avatar setup, and have not been validated as upload-ready VRChat avatars. The viewer previews geometry rather than faithfully rendering all source materials or textures. CPU-only generation, broad hardware coverage, and the optional Flash decoder are not validated; the Windows path uses the marching-cubes decoder because the optional `diso` dependency is not available in the tested Windows setup. Check the upstream model and asset licenses before redistribution or commercial use.
+This is an experimental local front end and does not require Blender. Generated meshes are not rigged, do not include Unity/VRChat avatar setup, and have not been validated as upload-ready avatars. The viewer can approximate basic per-mesh colors but does not render complete PBR materials or textures. CPU-only generation, broad hardware coverage, and the optional Flash decoder are not validated; the Windows path uses marching cubes because the optional `diso` dependency is not available in the tested Windows setup. First use needs internet access to download model weights. Check upstream model and asset licenses before redistribution or commercial use.
 
 ## Validation performed
 
 On Windows 10 with Python 3.10.11 and an NVIDIA RTX 5070 (CUDA 12.8):
 
 - `python -m pip check` — passed with no broken requirements.
-- `python -m py_compile app.py TripoSG.py` — passed.
+- `python -m py_compile app.py studio_metadata.py AETHRYXStudio.py` — passed.
 - Generated and opened a GLB from the repository's sample image on the GPU; the face-limited test mesh loaded as 2,506 vertices and 5,000 faces.
 - Loaded that GLB into the desktop 3D viewer and confirmed it rendered.
-- Built and launched the no-console Windows executable launcher.
+- Loaded the existing 1,384,278-face `output.glb` in the viewer; it displayed as an 8,000-face preview while retaining source statistics and scene data.
+- Tested a translated GLB scene: viewer transforms were respected, source geometry stayed unchanged, and selection, visibility, camera, wireframe, and solid controls worked.
+- Confirmed the Python GUI worker's output can be captured without opening a console window; built and launched the no-console executable launcher.
 
-There is not yet an automated test suite for the desktop UI, CPU inference, other GPU types, or Unity/VRChat avatar compatibility.
+There is not yet an automated test suite for the desktop UI, CPU inference, other GPU types, full material fidelity, or Unity/VRChat avatar compatibility.
 
 ## 💻 System Requirements
 
