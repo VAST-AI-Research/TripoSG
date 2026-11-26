@@ -161,6 +161,25 @@ def analyze_reference_image(source):
     }
 
 
+def _mask_rle(mask):
+    flat = mask.astype("uint8").reshape(-1)
+    runs = []
+    if flat.size == 0:
+        return runs
+    current = int(flat[0])
+    count = 1
+    for value in flat[1:]:
+        value = int(value)
+        if value == current:
+            count += 1
+        else:
+            runs.extend((current, count))
+            current = value
+            count = 1
+    runs.extend((current, count))
+    return runs
+
+
 def _onnx_segmentation_regions(source, width, height):
     model_path = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_MODEL", "")
     labels_text = os.environ.get("AETHRYX_SEMANTIC_SEGMENTATION_LABELS", "")
@@ -178,6 +197,7 @@ def _onnx_segmentation_regions(source, width, height):
     labels = [label.strip() for label in labels_text.split(",") if label.strip()]
     label_to_view = {
         "body": "other",
+        "character": "other",
         "torso": "clothing_detail",
         "face": "face_detail",
         "hair": "hair_detail",
@@ -190,32 +210,53 @@ def _onnx_segmentation_regions(source, width, height):
         "accessories": "accessory_detail",
     }
     try:
-        net = cv2.dnn.readNetFromONNX(str(model))
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        for package_name in ("nvidia/cudnn", "nvidia/cublas", "nvidia/cuda_runtime", "nvidia/cuda_nvrtc"):
+            package_bin = Path(__import__("sys").prefix) / "Lib" / "site-packages" / package_name / "bin"
+            if package_bin.is_dir():
+                os.environ["PATH"] = str(package_bin) + os.pathsep + os.environ.get("PATH", "")
         with Image.open(source) as pil_image:
             rgb = np.asarray(pil_image.convert("RGB"))
-        blob = cv2.dnn.blobFromImage(
-            rgb,
-            scalefactor=1.0 / 255.0,
-            size=(512, 512),
-            mean=(0, 0, 0),
-            swapRB=True,
-            crop=False,
+        import onnxruntime as ort
+        providers = []
+        available = ort.get_available_providers()
+        if "CUDAExecutionProvider" in available:
+            providers.append("CUDAExecutionProvider")
+        providers.append("CPUExecutionProvider")
+        session = ort.InferenceSession(str(model), providers=providers)
+        input_name = session.get_inputs()[0].name
+        input_shape = session.get_inputs()[0].shape
+        model_size = (
+            int(input_shape[2]) if isinstance(input_shape[2], int) else 1024,
+            int(input_shape[3]) if isinstance(input_shape[3], int) else 1024,
         )
-        net.setInput(blob)
-        output = net.forward()
-        if output.ndim == 4:
-            mask = np.argmax(output[0], axis=0)
-        elif output.ndim == 3:
-            mask = np.argmax(output, axis=0)
+        resized = cv2.resize(rgb, model_size, interpolation=cv2.INTER_AREA)
+        tensor = resized.astype(np.float32) / 255.0
+        tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+        output = session.run(None, {input_name: tensor})[0]
+        squeezed = np.squeeze(output)
+        if squeezed.ndim == 2:
+            mask_probs = squeezed.astype(np.float32)
+            if mask_probs.min() >= 0.0 and mask_probs.max() <= 1.0:
+                threshold = float(mask_probs.max()) * 0.5
+                binary = mask_probs >= threshold
+            else:
+                binary = (mask_probs - mask_probs.min()) > (
+                    (mask_probs.max() - mask_probs.min()) * 0.5
+                )
+            mask = cv2.resize(
+                binary.astype(np.uint8),
+                (width, height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        elif squeezed.ndim == 3:
+            channel_mask = np.argmax(squeezed, axis=0).astype(np.uint8)
+            mask = cv2.resize(
+                channel_mask,
+                (width, height),
+                interpolation=cv2.INTER_NEAREST,
+            )
         else:
             return [], "El modelo ONNX devolvió una forma de máscara no compatible"
-        mask = cv2.resize(
-            mask.astype(np.uint8),
-            (width, height),
-            interpolation=cv2.INTER_NEAREST,
-        )
         regions = []
         for class_index, label in enumerate(labels):
             view = label_to_view.get(label.lower())
@@ -240,10 +281,18 @@ def _onnx_segmentation_regions(source, width, height):
                 "origin": "onnx-segmentation",
                 "confidence": None,
                 "confirmed": False,
+                "mask": {
+                    "format": "rle_u8",
+                    "width": width,
+                    "height": height,
+                    "class_index": class_index,
+                    "runs": _mask_rle(mask == class_index),
+                },
                 "metadata": {
                     "provider": "onnx-segmentation",
                     "label": label,
                     "model": str(model),
+                    "execution_provider": session.get_providers()[0],
                 },
             })
         if not regions:

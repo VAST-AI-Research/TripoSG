@@ -23,9 +23,9 @@ def viewer_catalog():
         ViewerBackend(
             "pyvista-vtk",
             "PyVista/VTK",
-            False,
-            False,
-            "PyVista/VTK no instalado; aceleración no probada.",
+            True,
+            True,
+            "PyVista/VTK instalado y reportó la RTX 5070 como renderizador OpenGL; sin benchmark interactivo.",
         ),
     ]
 

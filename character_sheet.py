@@ -74,6 +74,7 @@ def validate_reference_regions(regions):
         confirmed = region.get("confirmed", True)
         keypoints = region.get("keypoints")
         metadata = region.get("metadata")
+        mask = region.get("mask")
         if not isinstance(region_id, str) or not region_id or len(region_id) > 64:
             raise ValueError("Identificador de referencia inválido.")
         if region_id in seen_ids:
@@ -110,6 +111,16 @@ def validate_reference_regions(regions):
                 raise ValueError("Los puntos de pose no son válidos.")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("Los metadatos de referencia no son válidos.")
+        if mask is not None:
+            if not isinstance(mask, dict):
+                raise ValueError("La máscara de referencia no es válida.")
+            if mask.get("format") != "rle_u8":
+                raise ValueError("Formato de máscara no compatible.")
+            if type(mask.get("width")) is not int or type(mask.get("height")) is not int:
+                raise ValueError("Dimensiones de máscara inválidas.")
+            runs = mask.get("runs")
+            if not isinstance(runs, list) or len(runs) % 2:
+                raise ValueError("RLE de máscara inválido.")
 
         path = Path(source).expanduser().resolve()
         if not path.is_file():
@@ -126,6 +137,7 @@ def validate_reference_regions(regions):
                 "confirmed": confirmed,
                 "keypoints": keypoints,
                 "metadata": metadata,
+                "mask": mask,
             }
         )
         seen_ids.add(region_id)

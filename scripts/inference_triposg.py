@@ -11,6 +11,7 @@ from huggingface_hub import snapshot_download
 from PIL import Image
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from triposg.pipelines.pipeline_triposg import TripoSGPipeline
 from image_process import prepare_image
@@ -73,6 +74,11 @@ if __name__ == "__main__":
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=7.0)
     parser.add_argument("--faces", type=int, default=-1)
+    parser.add_argument(
+        "--skip-background-removal",
+        action="store_true",
+        help="No cargar RMBG; usar canal alfa o máscara PNG proporcionada.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = args.device
@@ -82,11 +88,11 @@ if __name__ == "__main__":
     triposg_weights_dir = "pretrained_weights/TripoSG"
     rmbg_weights_dir = "pretrained_weights/RMBG-1.4"
     snapshot_download(repo_id="VAST-AI/TripoSG", local_dir=triposg_weights_dir)
-    snapshot_download(repo_id="briaai/RMBG-1.4", local_dir=rmbg_weights_dir)
-
-    # init rmbg model for background removal
-    rmbg_net = BriaRMBG.from_pretrained(rmbg_weights_dir).to(device)
-    rmbg_net.eval() 
+    rmbg_net = None
+    if not args.skip_background_removal:
+        snapshot_download(repo_id="briaai/RMBG-1.4", local_dir=rmbg_weights_dir)
+        rmbg_net = BriaRMBG.from_pretrained(rmbg_weights_dir).to(device)
+        rmbg_net.eval()
 
     # init tripoSG pipeline
     pipe: TripoSGPipeline = TripoSGPipeline.from_pretrained(triposg_weights_dir).to(device, dtype)

@@ -166,6 +166,29 @@ class CharacterSheetTests(unittest.TestCase):
             result = analyze_reference_image(path)
             self.assertNotIn("onnx-segmentation", result.get("providers", []))
 
+    def test_complete_rle_mask_is_validated_and_preserved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "character.png"
+            Image.new("RGB", (32, 32), "white").save(path)
+            region = {
+                "id": "ref-mask",
+                "path": str(path),
+                "view": "other",
+                "bbox": [0.0, 0.0, 1.0, 1.0],
+                "primary": False,
+                "origin": "onnx-segmentation",
+                "confirmed": False,
+                "mask": {
+                    "format": "rle_u8",
+                    "width": 32,
+                    "height": 32,
+                    "class_index": 1,
+                    "runs": [0, 512, 1, 512],
+                },
+            }
+            validated = validate_reference_regions([region])
+            self.assertEqual(validated[0]["mask"]["format"], "rle_u8")
+
     def test_pose_region_metadata_is_supported(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "pose.png"

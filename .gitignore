@@ -182,6 +182,7 @@ pyrightconfig.json
 
 # Model weights and download caches
 pretrained_weights/
+models/
 .cache/
 .huggingface/
 huggingface_cache/
