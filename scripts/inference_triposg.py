@@ -171,7 +171,11 @@ if __name__ == "__main__":
     result.export(args.output_path)
     if torch.cuda.is_available():
         peak_mib = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        print(f"AETHRYX Adaptive peak VRAM: {peak_mib:.1f} MiB")
+        allocated_mib = torch.cuda.memory_allocated() / (1024 ** 2)
+        reserved_mib = torch.cuda.memory_reserved() / (1024 ** 2)
+        print(f"AETHRYX PyTorch allocated VRAM: {allocated_mib:.1f} MiB")
+        print(f"AETHRYX PyTorch reserved VRAM: {reserved_mib:.1f} MiB")
+        print(f"AETHRYX PyTorch peak allocated VRAM: {peak_mib:.1f} MiB")
         torch.cuda.reset_peak_memory_stats()
     if adaptive:
         print("AETHRYX Adaptive profile:", adaptive.profile)

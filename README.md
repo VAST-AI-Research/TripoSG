@@ -87,6 +87,10 @@ See `AETHRYX_GENESIS_PHASE2.md` for the 50/75-step RTX 5070 TripoSG comparison,
 ISNet integration, PyVista evidence, original/25k/100k mesh copies, and
 anatomical defects observed.
 
+See `AETHRYX_GENESIS_PHASE3.md` and `test_assets/anime/genesis-phase3/` for
+the original T-pose reference, independent VRAM metrics, corrected cameras,
+the repaired-copy test and real component export.
+
 See `AETHRYX_ADAPTIVE_ENGINE.md` for hardware profiles, FP16/INT8/INT4 status,
 CPU offloading, CUDA OOM recovery, basic edit mode and benchmark requirements.
 

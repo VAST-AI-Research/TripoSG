@@ -28,7 +28,12 @@ from aethryx_engines import engine_catalog, prepare_character_alpha
 from aethryx_tools import analyze_project_diagnostics, execute_tool, tool_catalog
 from aethryx_viewer import viewer_catalog
 from aethryx_adaptive import adaptive_plan_dict, build_adaptive_plan
-from aethryx_avatar import build_avatar_scene_graph
+from aethryx_avatar import (
+    analyze_mesh_symmetry,
+    build_avatar_scene_graph,
+    export_disconnected_components,
+    repair_mesh_copy,
+)
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -256,6 +261,10 @@ class AethryxStudio(tk.Tk):
         scene_menu.add_command(label="Aislar seleccion", command=self.isolate_selection)
         scene_menu.add_command(label="Mostrar todos los objetos", command=self.show_all_objects)
         scene_menu.add_command(label="Scene graph del avatar...", command=self.show_avatar_scene_graph)
+        scene_menu.add_command(
+            label="Exportar componentes 3D desconectados...",
+            command=self.export_disconnected_components,
+        )
         scene_menu.add_command(label="Renombrar objeto - proximo", state="disabled")
         self.main_menu.add_cascade(label="Escena", menu=scene_menu)
 
@@ -276,6 +285,14 @@ class AethryxStudio(tk.Tk):
         tools_menu.add_command(
             label="AETHRYX Adaptive Engine...",
             command=self.show_adaptive_engine,
+        )
+        tools_menu.add_command(
+            label="Reparar copia de malla...",
+            command=self.repair_loaded_mesh,
+        )
+        tools_menu.add_command(
+            label="Analizar simetría X...",
+            command=self.analyze_loaded_symmetry,
         )
         for label in ("Reparacion - proximo", "Simetria - proximo", "Retopologia - proximo", "Rigging - proximo"):
             tools_menu.add_command(label=label, state="disabled")
@@ -1050,6 +1067,64 @@ class AethryxStudio(tk.Tk):
             "\n".join("- " + finding for finding in result["findings"]),
         )
 
+    def repair_loaded_mesh(self):
+        if not self.current_model_path or not os.path.isfile(self.current_model_path):
+            messagebox.showinfo("Reparación", "Importa o genera una malla primero.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Guardar copia reparada",
+            defaultextension=".glb",
+            filetypes=[("GLB", "*.glb")],
+        )
+        if not path:
+            return
+        result = repair_mesh_copy(self.current_model_path, path)
+        if result["status"] != "available":
+            messagebox.showerror("Reparación", result["reason"])
+            return
+        after = result["after"]
+        messagebox.showinfo(
+            "Reparación no destructiva",
+            f"Antes: {result['before']['vertices']} vértices / {result['before']['faces']} caras\n"
+            f"Después: {after['vertices']} vértices / {after['faces']} caras\n"
+            f"Watertight: {'sí' if after['watertight'] else 'no'}\n"
+            "La malla original no fue modificada.",
+        )
+
+    def analyze_loaded_symmetry(self):
+        if not self.current_model_path or not os.path.isfile(self.current_model_path):
+            messagebox.showinfo("Simetría", "Importa o genera una malla primero.")
+            return
+        result = analyze_mesh_symmetry(self.current_model_path, axis="x")
+        if result["status"] != "available":
+            messagebox.showerror("Simetría", result["reason"])
+            return
+        messagebox.showinfo(
+            "Simetría X",
+            f"Distancia media espejo: {result['mean_vertex_mirror_distance']:.6f}\n"
+            f"Distancia máxima espejo: {result['max_vertex_mirror_distance']:.6f}",
+        )
+
+    def export_disconnected_components(self):
+        if not self.current_model_path or not os.path.isfile(self.current_model_path):
+            messagebox.showinfo(
+                "Componentes geométricos",
+                "Importa o genera una malla primero.",
+            )
+            return
+        output_dir = filedialog.askdirectory(title="Exportar componentes 3D")
+        if not output_dir:
+            return
+        result = export_disconnected_components(self.current_model_path, output_dir)
+        if result["status"] != "available":
+            messagebox.showerror("Componentes geométricos", result["reason"])
+            return
+        messagebox.showinfo(
+            "Componentes geométricos",
+            f"Se exportaron {len(result['components'])} componente(s) desconectado(s).\n"
+            "La asignación anatómica permanece pendiente.",
+        )
+
     def show_avatar_scene_graph(self):
         nodes = build_avatar_scene_graph(self.reference_regions, self.model_stats)
         self.avatar_nodes = nodes
@@ -1349,9 +1424,21 @@ class AethryxStudio(tk.Tk):
                 f"{alpha_result['provider']}."
             )
         else:
-            self.append_log(
-                "ISNet: fondo no preparado; " + alpha_result["reason"]
+            reason = alpha_result["reason"]
+            self.append_log("ISNet: fondo no preparado; " + reason)
+            messagebox.showerror(
+                "ISNet no disponible",
+                "No se pudo preparar un canal alfa válido.\n"
+                "La generación se canceló para evitar usar una imagen sin máscara.\n\n"
+                + reason,
             )
+            if temporary_image and os.path.exists(temporary_image):
+                try:
+                    os.remove(temporary_image)
+                except OSError:
+                    pass
+            self.status.set("Generacion cancelada: canal alfa ISNet no disponible.")
+            return
 
         self.generation_active = True
         self.cancel_event = threading.Event()

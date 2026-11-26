@@ -6,7 +6,12 @@ from PIL import Image
 import numpy as np
 import trimesh
 
-from aethryx_avatar import build_avatar_scene_graph, split_disconnected_components
+from aethryx_avatar import (
+    analyze_mesh_symmetry,
+    build_avatar_scene_graph,
+    repair_mesh_copy,
+    split_disconnected_components,
+)
 from studio_project import save_project, load_project
 
 
@@ -50,6 +55,27 @@ class AvatarSceneGraphTests(unittest.TestCase):
                 component["classification"] == "unassigned"
                 for component in result["components"]
             ))
+
+    def test_repair_copy_is_real_and_preserves_original_counts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "source.glb"
+            output = Path(folder) / "repaired.glb"
+            mesh = trimesh.creation.box(extents=(2, 2, 2))
+            mesh.export(str(path), file_type="glb")
+            result = repair_mesh_copy(path, output)
+            self.assertEqual(result["status"], "available")
+            self.assertTrue(output.is_file())
+            original = trimesh.load(str(path), force="mesh", process=False)
+            self.assertEqual(result["before"]["vertices"], len(original.vertices))
+            self.assertGreaterEqual(result["after"]["vertices"], 1)
+
+    def test_symmetry_analysis_runs_on_a_real_mesh(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "symmetric.glb"
+            trimesh.creation.box(extents=(2, 2, 2)).export(str(path), file_type="glb")
+            result = analyze_mesh_symmetry(path, axis="x")
+            self.assertEqual(result["status"], "available")
+            self.assertGreaterEqual(result["mean_vertex_mirror_distance"], 0)
 
     def test_avatar_scene_graph_round_trip_in_project_version_2(self):
         with tempfile.TemporaryDirectory() as folder:
