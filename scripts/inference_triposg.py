@@ -66,9 +66,6 @@ def simplify_mesh(mesh: trimesh.Trimesh, n_faces):
         return mesh
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-input", type=str, required=True)
     parser.add_argument("--output-path", type=str, default="./output.glb")
@@ -76,7 +73,10 @@ if __name__ == "__main__":
     parser.add_argument("--num-inference-steps", type=int, default=50)
     parser.add_argument("--guidance-scale", type=float, default=7.0)
     parser.add_argument("--faces", type=int, default=-1)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
+    device = args.device
+    dtype = torch.float16 if device.startswith("cuda") else torch.float32
 
     # download pretrained weights
     triposg_weights_dir = "pretrained_weights/TripoSG"

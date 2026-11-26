@@ -1,14 +1,16 @@
-diffusers
-transformers
+diffusers==0.32.2
+transformers==4.49.0
 einops
-huggingface_hub
+huggingface_hub==0.36.2
 opencv-python
 trimesh
 omegaconf
 scikit-image
-numpy==1.22.3
-peft
+scipy
+numpy>=1.24,<2
+matplotlib>=3.8,<4
+Pillow>=10
+peft==0.14.0
 jaxtyping
 typeguard
-diso
-pymeshlab # Added for face reduction
+pymeshlab

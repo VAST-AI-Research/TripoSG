@@ -43,20 +43,31 @@ git clone https://github.com/VAST-AI-Research/TripoSG.git
 cd TripoSG
 ```
 
-Create a conda environment (optional):
+Create a Python 3.10 environment (Conda or `venv`):
 ```bash
 conda create -n tripoSG python=3.10
 conda activate tripoSG
 ```
 
-Install dependencies:
+On Windows, a `venv` can be created from PowerShell:
 ```bash
-# pytorch (select correct CUDA version)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/{your-cuda-version}
-
-# other dependencies
-pip install -r requirements.txt
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
 ```
+
+Install PyTorch for the CUDA version supported by your NVIDIA driver (CUDA 12.8 example), then install the project dependencies:
+```bash
+.\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### Nikix 3D Studio desktop app (experimental)
+
+Start the app with `.\iniciar-triposg.bat`. Select an image and output path, set the inference steps and face limit, then choose **Generate 3D model**. The app shows generation output and progress, and opens the resulting mesh in its interactive viewer. Use the mouse to rotate and zoom, the Matplotlib toolbar to pan/reset the view, or **Open 3D model...** to inspect an existing GLB, GLTF, OBJ, STL, or PLY file.
+
+The generated `TripoSG.exe` launcher is optional and is not a standalone distribution: it expects the repository, `.venv`, and downloaded model weights to remain available. The batch launcher is the simplest way to start the local app.
+
+The first generation downloads model weights from Hugging Face and therefore needs an internet connection. Weights are stored under `pretrained_weights/` and are intentionally excluded from Git.
 
 ## 💡 Quick Start
 
@@ -77,8 +88,26 @@ or from scribble+prompt:
 
 The required model weights will be automatically downloaded:
 - TripoSG (image condition) model from [VAST-AI/TripoSG](https://huggingface.co/VAST-AI/TripoSG) → `pretrained_weights/TripoSG`
-= TripoSG-scribble (scribble+prompt condition) model from [VAST-AI/TripoSG-scribble](https://huggingface.co/VAST-AI/TripoSG-scribble) → `pretrained_weights/TripoSG-scribble`
+- TripoSG-scribble (scribble+prompt condition) model from [VAST-AI/TripoSG-scribble](https://huggingface.co/VAST-AI/TripoSG-scribble) → `pretrained_weights/TripoSG-scribble`
 - RMBG model from [briaai/RMBG-1.4](https://huggingface.co/briaai/RMBG-1.4) → `pretrained_weights/RMBG-1.4`
+
+## Implementation status
+
+The Windows desktop app currently supports image-to-mesh generation, progress and output logs, GLB export, and interactive geometry preview/loading for common mesh formats. Mesh previews are simplified when needed to keep the viewer responsive.
+
+This is an experimental local front end for TripoSG and does not require Blender, but it is not yet a complete avatar authoring tool. Generated meshes are not rigged, do not include Unity/VRChat avatar setup, and have not been validated as upload-ready VRChat avatars. The viewer previews geometry rather than faithfully rendering all source materials or textures. CPU-only generation, broad hardware coverage, and the optional Flash decoder are not validated; the Windows path uses the marching-cubes decoder because the optional `diso` dependency is not available in the tested Windows setup. Check the upstream model and asset licenses before redistribution or commercial use.
+
+## Validation performed
+
+On Windows 10 with Python 3.10.11 and an NVIDIA RTX 5070 (CUDA 12.8):
+
+- `python -m pip check` — passed with no broken requirements.
+- `python -m py_compile app.py TripoSG.py` — passed.
+- Generated and opened a GLB from the repository's sample image on the GPU; the face-limited test mesh loaded as 2,506 vertices and 5,000 faces.
+- Loaded that GLB into the desktop 3D viewer and confirmed it rendered.
+- Built and launched the no-console Windows executable launcher.
+
+There is not yet an automated test suite for the desktop UI, CPU inference, other GPU types, or Unity/VRChat avatar compatibility.
 
 ## 💻 System Requirements
 

@@ -203,7 +203,7 @@ class TripoSGScribblePipeline(DiffusionPipeline, TransformerDiffusionMixin):
         dense_octree_depth: int = 8, 
         hierarchical_octree_depth: int = 9,
         flash_octree_depth: int = 9,
-        use_flash_decoder: bool = True,
+        use_flash_decoder: bool = False,
         return_dict: bool = True,
     ):
         self._guidance_scale = guidance_scale
