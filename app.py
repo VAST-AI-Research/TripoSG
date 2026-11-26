@@ -19,6 +19,8 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from character_sheet import REFERENCE_VIEW_LABELS, crop_reference, validate_reference_regions
 from character_sheet_dialog import CharacterSheetDialog
 from studio_project import validate_settings, validate_glb, save_project, load_project
+from aethryx_engines import engine_catalog
+from aethryx_tools import tool_catalog
 
 from studio_metadata import (
     ASSISTANT_NAME,
@@ -252,6 +254,10 @@ class AethryxStudio(tk.Tk):
 
         tools_menu = tk.Menu(self.main_menu, **menu_colors)
         tools_menu.add_command(label="Estadisticas de malla...", command=self.show_mesh_statistics)
+        tools_menu.add_command(
+            label="Motores y herramientas disponibles...",
+            command=self.show_engine_inventory,
+        )
         for label in ("Reparacion - proximo", "Simetria - proximo", "Retopologia - proximo", "Rigging - proximo"):
             tools_menu.add_command(label=label, state="disabled")
         self.main_menu.add_cascade(label="Herramientas", menu=tools_menu)
@@ -953,6 +959,24 @@ class AethryxStudio(tk.Tk):
             f"Caras fuente: {stats['faces']:,}\n"
             f"Cerrada (watertight): {'si' if stats['watertight'] else 'no'}\n"
             f"Dimensiones locales: {dimensions[0]:.4g} x {dimensions[1]:.4g} x {dimensions[2]:.4g}",
+        )
+
+    def show_engine_inventory(self):
+        engines = []
+        for engine in engine_catalog():
+            state = "disponible" if engine.available else "no disponible"
+            engines.append(
+                f"{engine.name}: {state}; monovista={engine.single_view}; "
+                f"multivista={engine.multi_view}; licencia={engine.license}; "
+                f"comercial={engine.commercial_review}"
+            )
+        tools = []
+        for tool in tool_catalog():
+            state = "disponible" if tool["available"] else "no disponible"
+            tools.append(f"{tool['name']}: {state}")
+        messagebox.showinfo(
+            "Motores y herramientas",
+            "Motores\n" + "\n".join(engines) + "\n\nHerramientas\n" + "\n".join(tools),
         )
 
     def open_output_folder(self):

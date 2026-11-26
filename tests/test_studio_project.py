@@ -3,6 +3,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from PIL import Image
 from studio_project import save_project, load_project, validate_settings, validate_glb
 
 class ProjectTests(unittest.TestCase):
@@ -41,6 +42,28 @@ class ProjectTests(unittest.TestCase):
             data.pop("references")
             project.write_text(json.dumps(data), encoding="utf-8")
             self.assertEqual(load_project(project)["references"], [])
+    def test_reference_provenance_round_trip(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            image = root / "sheet.png"
+            Image.new("RGB", (32, 32), "white").save(image)
+            project = root / "provenance.aeth"
+            region = {
+                "id": "ref-face",
+                "path": str(image),
+                "view": "face_detail",
+                "bbox": [0.1, 0.1, 0.5, 0.5],
+                "primary": False,
+                "origin": "opencv-haar",
+                "confidence": None,
+                "confirmed": False,
+            }
+            save_project(project, image=image, model=None, output=root / "mesh.glb",
+                         steps=50, faces=-1, seed=42, guidance=7.0,
+                         references=[region])
+            loaded = load_project(project)["references"][0]
+            self.assertEqual(loaded["origin"], "opencv-haar")
+            self.assertFalse(loaded["confirmed"])
     def test_invalid_settings(self):
         for values in [(0,-1,42,7), (50,0,42,7), (50,-1,-1,7), (50,-1,42,float("nan"))]:
             with self.assertRaises(ValueError):

@@ -10,6 +10,7 @@ from character_sheet import (
     validate_bbox,
     validate_reference_regions,
 )
+from aethryx_engines import analyze_reference_image, engine_catalog, missing_reference_views
 
 
 class CharacterSheetTests(unittest.TestCase):
@@ -61,6 +62,28 @@ class CharacterSheetTests(unittest.TestCase):
         for bbox in ([0, 0, 1.1, 1], [0.5, 0.5, 0.5, 0.8], [0, 0, float("nan"), 1]):
             with self.subTest(bbox=bbox), self.assertRaises(ValueError):
                 validate_bbox(bbox)
+
+    def test_missing_views_are_not_predictions(self):
+        result = missing_reference_views([
+            {"view": "front", "confirmed": True},
+            {"view": "side", "confirmed": False},
+        ])
+        self.assertEqual(result["confirmed_views"], ["front"])
+        self.assertEqual(result["missing"], ["side", "back", "three_quarter"])
+
+    def test_engine_catalog_keeps_multiview_explicitly_unavailable(self):
+        engines = {engine.engine_id: engine for engine in engine_catalog()}
+        self.assertTrue(engines["triposg"].single_view)
+        self.assertFalse(engines["triposg"].multi_view)
+        self.assertFalse(engines["multiview-character"].available)
+
+    def test_reference_analysis_returns_an_explicit_state(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "blank.png"
+            Image.new("RGB", (64, 64), "white").save(path)
+            result = analyze_reference_image(path)
+            self.assertIn(result["status"], ("available", "completed", "unavailable"))
+            self.assertIsInstance(result["regions"], list)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from character_sheet import (
     normalize_bbox,
     validate_reference_regions,
 )
+from aethryx_engines import analyze_reference_image, missing_reference_views
 
 
 class CharacterSheetDialog(tk.Toplevel):
@@ -102,9 +103,19 @@ class CharacterSheetDialog(tk.Toplevel):
         )
         self.view_combo.pack(fill="x", pady=(3, 8))
         ttk.Button(controls, text="Añadir recorte", command=self.add_region).pack(fill="x")
+        ttk.Button(
+            controls,
+            text="Analizar automáticamente",
+            command=self.analyze_automatic,
+        ).pack(fill="x", pady=(5, 0))
         ttk.Button(controls, text="Marcar como vista principal", command=self.set_primary).pack(
             fill="x", pady=(5, 12)
         )
+        ttk.Button(
+            controls,
+            text="Confirmar región seleccionada",
+            command=self.confirm_region,
+        ).pack(fill="x", pady=(0, 12))
 
         self.region_tree = ttk.Treeview(
             controls,
@@ -151,7 +162,11 @@ class CharacterSheetDialog(tk.Toplevel):
             iid=region["id"],
             values=(
                 REFERENCE_VIEW_LABELS[region["view"]],
-                "Principal" if region["primary"] else "Referencia",
+                (
+                    "Principal"
+                    if region["primary"]
+                    else ("Confirmada" if region["confirmed"] else "Pendiente")
+                ),
                 bounds,
             ),
         )
@@ -262,6 +277,38 @@ class CharacterSheetDialog(tk.Toplevel):
         self.status.set(f"Recorte añadido: {REFERENCE_VIEW_LABELS[view]}.")
         self._render_image()
 
+    def analyze_automatic(self):
+        result = analyze_reference_image(self.image_path)
+        if result["status"] == "unavailable":
+            self.status.set(f"Análisis automático no disponible: {result['reason']}.")
+            return
+        accepted = 0
+        for region in result["regions"]:
+            duplicate = any(
+                existing["view"] == region["view"]
+                and existing["bbox"] == region["bbox"]
+                for existing in self.regions
+            )
+            if duplicate:
+                continue
+            try:
+                self.regions = validate_reference_regions(self.regions + [region])
+            except ValueError as exc:
+                self.status.set(str(exc))
+                return
+            self._insert_region(region)
+            accepted += 1
+        missing = missing_reference_views(self.regions)
+        if accepted:
+            self.status.set(
+                f"Detecciones locales: {accepted} recorte(s) añadido(s); "
+                "requieren confirmación manual. "
+                f"Vistas completas confirmadas: {len(missing['confirmed_views'])}."
+            )
+        else:
+            self.status.set(result["reason"] + " Puedes seguir usando recortes manuales.")
+        self._render_image()
+
     def set_primary(self):
         selected = self.region_tree.selection()
         if not selected:
@@ -277,6 +324,23 @@ class CharacterSheetDialog(tk.Toplevel):
         self._refresh_region_tree()
         self.status.set(
             f"Vista principal: {REFERENCE_VIEW_LABELS[region['view']]}. El motor actual usará solo este recorte."
+        )
+        self._render_image()
+
+    def confirm_region(self):
+        selected = self.region_tree.selection()
+        if not selected:
+            self.status.set("Selecciona una región para confirmarla.")
+            return
+        region_id = selected[0]
+        region = next((item for item in self.regions if item["id"] == region_id), None)
+        if region is None:
+            return
+        region["confirmed"] = True
+        self._refresh_region_tree()
+        self.status.set(
+            f"Confirmada manualmente: {REFERENCE_VIEW_LABELS[region['view']]}. "
+            "Esta aprobación reemplaza la detección automática."
         )
         self._render_image()
 

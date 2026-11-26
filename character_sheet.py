@@ -64,6 +64,9 @@ def validate_reference_regions(regions):
         source = region.get("path")
         view = region.get("view")
         primary = region.get("primary", False)
+        origin = region.get("origin", "manual")
+        confidence = region.get("confidence")
+        confirmed = region.get("confirmed", True)
         if not isinstance(region_id, str) or not region_id or len(region_id) > 64:
             raise ValueError("Identificador de referencia inválido.")
         if region_id in seen_ids:
@@ -76,6 +79,13 @@ def validate_reference_regions(regions):
             raise ValueError("El estado de vista principal debe ser booleano.")
         if primary and view not in FULL_BODY_VIEWS:
             raise ValueError("Solo una vista de cuerpo completo puede ser principal.")
+        if origin not in ("manual", "opencv-haar"):
+            raise ValueError("Origen de referencia no compatible.")
+        if confidence is not None:
+            if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
+                raise ValueError("La confianza debe estar entre 0 y 1.")
+        if type(confirmed) is not bool:
+            raise ValueError("El estado de confirmación debe ser booleano.")
 
         path = Path(source).expanduser().resolve()
         if not path.is_file():
@@ -87,6 +97,9 @@ def validate_reference_regions(regions):
                 "view": view,
                 "bbox": validate_bbox(region.get("bbox")),
                 "primary": primary,
+                "origin": origin,
+                "confidence": confidence,
+                "confirmed": confirmed,
             }
         )
         seen_ids.add(region_id)
