@@ -192,7 +192,7 @@ class TripoSGPipeline(DiffusionPipeline, TransformerDiffusionMixin):
         dense_octree_depth: int = 8, 
         hierarchical_octree_depth: int = 9,
         flash_octree_depth: int = 9,
-        use_flash_decoder: bool = True,
+        use_flash_decoder: bool = False,
         return_dict: bool = True,
     ):
         # 1. Define call parameters

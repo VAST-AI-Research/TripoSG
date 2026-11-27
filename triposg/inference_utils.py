@@ -4,7 +4,6 @@ import torch.nn as nn
 import scipy.ndimage
 from skimage import measure
 from einops import repeat
-from diso import DiffDMC
 import torch.nn.functional as F
 
 from triposg.utils.typing import *
@@ -98,7 +97,7 @@ def find_candidates_band(occupancy_grid: torch.Tensor, band_threshold: float, n_
     return core_mesh_coords 
 
 def expand_edge_region_fast(edge_coords, grid_size):
-    expanded_tensor = torch.zeros(grid_size, grid_size, grid_size, device='cuda', dtype=torch.float16, requires_grad=False)
+    expanded_tensor = torch.zeros(grid_size, grid_size, grid_size, device=edge_coords.device, dtype=torch.float16, requires_grad=False)
     expanded_tensor[edge_coords[:, 0], edge_coords[:, 1], edge_coords[:, 2]] = 1
     if grid_size < 512:
         kernel_size = 5
@@ -181,7 +180,7 @@ def hierarchical_extract_geometry(geometric_func: Callable,
 
         indices = all_logits[..., :3]
         indices = indices * (normalize_offset / abs(bounds[0]))  + normalize_offset
-        indices = indices.type(torch.IntTensor)
+        indices = indices.to(dtype=torch.int64)
         values = all_logits[:, 3]
         # breakpoint()
         high_res_occupancy[indices[:, 0], indices[:, 1], indices[:, 2]] = values
@@ -327,6 +326,13 @@ def flash_extract_geometry(
     mini_grid_num: int = 4,
     **kwargs,
 ):
+    try:
+        from diso import DiffDMC
+    except ImportError as exc:
+        raise RuntimeError(
+            "The flash mesh decoder requires diso; use use_flash_decoder=False instead."
+        ) from exc
+
     geo_decoder = vae.decoder
     device = latents.device
     dtype = latents.dtype

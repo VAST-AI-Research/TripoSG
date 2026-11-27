@@ -44,9 +44,6 @@ def run_triposg_scribble(
 
 
 if __name__ == "__main__":
-    device = "cuda"
-    dtype = torch.float16
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--image-input", type=str, required=True)
     parser.add_argument("--prompt", type=str, required=True)
@@ -56,7 +53,10 @@ if __name__ == "__main__":
     # feel free to tune the scribble confidence, 0.3-0.5 often gives good results for hand-drawn sketches
     parser.add_argument("--scribble-conf", type=float, default=0.4)
     parser.add_argument("--prompt-conf", type=float, default=1.0)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
+    device = args.device
+    dtype = torch.float16 if device.startswith("cuda") else torch.float32
 
     # download pretrained weights
     triposg_scribble_weights_dir = "pretrained_weights/TripoSG-scribble"

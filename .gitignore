@@ -130,9 +130,9 @@ celerybeat.pid
 
 # Environments
 .env
-.venv
-env/
+.venv/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
@@ -180,4 +180,36 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Model weights and download caches
 pretrained_weights/
+models/
+external/
+.cache/
+.huggingface/
+huggingface_cache/
+cache/
+
+# Local credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# User-provided images and generated previews
+user_images/
+personal_images/
+private_images/
+*.aeth
+assets/doc/aethryx-studio-ui.png
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.bmp
+nikix*.webp
+*-preview.png
+*_credentials.*
+*.token

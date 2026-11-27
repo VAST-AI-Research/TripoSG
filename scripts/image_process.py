@@ -18,6 +18,7 @@ def find_bounding_box(gray_image):
     return x, y, w, h
 
 def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
+    device = next(rmbg_net.parameters()).device if rmbg_net is not None else torch.device("cpu")
     img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         return f"invalid image path {img_path}"
@@ -68,17 +69,17 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
         if not is_valid_alpha(alpha):
             alpha = None
         else:
-            alpha_gpu = torch.from_numpy(alpha).unsqueeze(0).cuda().float() / 255.
+            alpha_gpu = torch.from_numpy(alpha).unsqueeze(0).to(device).float() / 255.
     else:
         return f"invalid image: channels {num_channels}"
     
-    rgb_image_gpu = torch.from_numpy(rgb_image).cuda().float().permute(2, 0, 1) / 255.
+    rgb_image_gpu = torch.from_numpy(rgb_image).to(device).float().permute(2, 0, 1) / 255.
     if alpha is None:
         resize_transform = transforms.Resize((384, 384), antialias=True)
         rgb_image_resized = resize_transform(rgb_image_gpu)
         normalize_image = rgb_image_resized * 2 - 1
 
-        mean_color = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).cuda()
+        mean_color = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1).to(device)
         resize_transform = transforms.Resize((1024, 1024), antialias=True)
         rgb_image_resized = resize_transform(rgb_image_gpu)
         max_value = rgb_image_resized.flatten().max()
@@ -102,10 +103,10 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
 
         _, alpha = cv2.threshold(alpha, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
         labeled_alpha = label(alpha)
-        cleaned_alpha = remove_small_objects(labeled_alpha, min_size=200)
+        cleaned_alpha = remove_small_objects(labeled_alpha > 0, min_size=200)
         cleaned_alpha = (cleaned_alpha > 0).astype(np.uint8)
         alpha = cleaned_alpha * 255
-        alpha_gpu = torch.from_numpy(cleaned_alpha).cuda().float().unsqueeze(0)
+        alpha_gpu = torch.from_numpy(cleaned_alpha).to(device).float().unsqueeze(0)
         x, y, w, h = find_bounding_box(alpha)
 
     # If alpha is provided, the bounds of all foreground are used
@@ -125,7 +126,7 @@ def load_image(img_path, bg_color=None, rmbg_net=None, padding_ratio=0.1):
         raise ValueError(f"input image too small")
     
     bg_gray = bg_color[0]
-    bg_color = torch.from_numpy(bg_color).float().cuda().repeat(alpha_gpu.shape[1], alpha_gpu.shape[2], 1).permute(2, 0, 1)
+    bg_color = torch.from_numpy(bg_color).float().to(device).repeat(alpha_gpu.shape[1], alpha_gpu.shape[2], 1).permute(2, 0, 1)
     rgb_image_gpu = rgb_image_gpu * alpha_gpu + bg_color * (1 - alpha_gpu)
     padding_size = [0] * 6
     if w > h:

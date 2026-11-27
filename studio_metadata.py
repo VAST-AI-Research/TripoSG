@@ -1,0 +1,6 @@
+PRODUCT_NAME = "AETHRYX Studio"
+WORKING_BRAND = "NIKIX"
+TAGLINE = "Mas alla de la imaginacion, mas alla de las dimensiones."
+ASSISTANT_NAME = "KIRIA"
+ENGINE_NAME = "TripoSG"
+VERSION_LABEL = "Development build (unversioned)"
